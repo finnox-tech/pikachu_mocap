@@ -1,7 +1,7 @@
 import bpy
 import json
 from math import radians, degrees
-from mathutils import Euler
+from mathutils import Euler, Matrix
 
 from . import server
 
@@ -44,6 +44,18 @@ def get_armature(armature_name=ARMATURE_NAME):
             return obj
 
     return None
+
+
+def _send_debug(message):
+    try:
+        if hasattr(server, "add_log"):
+            server.add_log(message)
+        server.send_message({
+            "type": "debug",
+            "message": str(message)
+        })
+    except Exception:
+        pass
 
 
 def ensure_pose_mode(arm):
@@ -111,6 +123,7 @@ def set_joint(bone_name, axis, angle):
         arm, bone = get_pose_bone(ARMATURE_NAME, bone_name)
     except Exception as e:
         print("Set joint error:", e)
+        _send_debug(f"Set joint error: {e}")
         return
 
     bone.rotation_mode = 'XYZ'
@@ -212,6 +225,71 @@ def get_bone_tree():
 
 
 # ==========================
+# 获取骨骼变换
+# ==========================
+
+def _matrix_to_list(mat):
+    return [list(row) for row in mat]
+
+
+def get_bone_transforms(bone_names=None, debug=False):
+
+    arm = get_armature()
+
+    if arm is None:
+        if debug:
+            _send_debug("Armature not found for transforms.")
+        return []
+
+    if not ensure_pose_mode(arm):
+        if debug:
+            _send_debug("Failed to enter pose mode.")
+        return []
+
+    bpy.context.view_layer.update()
+
+    transforms = []
+    name_filter = None
+    if bone_names:
+        try:
+            name_filter = set()
+            for name in bone_names:
+                bone = arm.pose.bones.get(name)
+                while bone:
+                    name_filter.add(bone.name)
+                    bone = bone.parent
+        except Exception:
+            name_filter = None
+
+    for bone in arm.pose.bones:
+        if name_filter is not None and bone.name not in name_filter:
+            continue
+
+        parent = bone.parent
+        if parent:
+            local = parent.matrix.inverted_safe() @ bone.matrix
+            parent_name = parent.name
+        else:
+            local = bone.matrix.copy()
+            parent_name = None
+
+        world_matrix = arm.matrix_world @ bone.matrix
+        head = arm.matrix_world @ bone.head
+        tail = arm.matrix_world @ bone.tail
+
+        transforms.append({
+            "name": bone.name,
+            "parent": parent_name,
+            "head": [float(v) for v in head],
+            "tail": [float(v) for v in tail],
+            "matrix": _matrix_to_list(world_matrix),
+            "local_matrix": _matrix_to_list(local)
+        })
+
+    return transforms
+
+
+# ==========================
 # 处理消息
 # ==========================
 
@@ -247,9 +325,21 @@ def handle_message(msg):
                 "data": bones
             })
 
+        elif data["type"] == "request_transforms":
+
+            requested = data.get("bones") or []
+            transforms = get_bone_transforms(requested, debug=True)
+            _send_debug(f"Send transforms: {len(transforms)} (requested {len(requested)} + ancestors)")
+
+            server.send_message({
+                "type": "transforms",
+                "data": transforms
+            })
+
     except Exception as e:
 
         print("Message error:", e)
+        _send_debug(f"Message error: {e}")
 
 
 # ==========================

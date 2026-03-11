@@ -8,10 +8,30 @@ bl_info = {
 }
 
 import bpy
+import os
 from math import degrees
 
 from . import server
 from . import rig_sync
+
+
+# ==========================
+# Log helpers
+# ==========================
+
+def _ensure_server_logs():
+    if not hasattr(server, "log_messages"):
+        server.log_messages = []
+    if not hasattr(server, "add_log"):
+        def _fallback_add_log(message):
+            text = str(message)
+            server.log_messages.append(text)
+            if len(server.log_messages) > 50:
+                del server.log_messages[:-50]
+            if hasattr(server, "_mark_state_dirty"):
+                server._mark_state_dirty()
+        server.add_log = _fallback_add_log
+    return server.log_messages
 
 
 # ==========================
@@ -108,12 +128,21 @@ class SKSERVER_PT_panel(bpy.types.Panel):
 
         layout.separator()
 
-        if arm:
-            layout.label(text="Bones:")
+        layout.separator()
+        layout.label(text="Logs:")
+        logs = _ensure_server_logs()[-8:]
+        if not logs:
+            layout.label(text="(no logs)")
+        for line in logs:
+            layout.label(text=str(line)[:80])
 
-            for b in arm.data.bones[:20]:
-
-                layout.label(text=b.name)
+        layout.separator()
+        layout.label(text="Paths:")
+        layout.label(text=f"Addon: {os.path.abspath(__file__)[:80]}")
+        if hasattr(server, "__file__"):
+            layout.label(text=f"Server: {os.path.abspath(server.__file__)[:80]}")
+        if hasattr(rig_sync, "__file__"):
+            layout.label(text=f"RigSync: {os.path.abspath(rig_sync.__file__)[:80]}")
 
 
 classes = [
@@ -127,6 +156,13 @@ def register():
 
     for c in classes:
         bpy.utils.register_class(c)
+    logs = _ensure_server_logs()
+    server.add_log("Addon registered")
+    server.add_log(f"Addon path: {os.path.abspath(__file__)}")
+    if hasattr(server, "__file__"):
+        server.add_log(f"Server path: {os.path.abspath(server.__file__)}")
+    if hasattr(rig_sync, "__file__"):
+        server.add_log(f"RigSync path: {os.path.abspath(rig_sync.__file__)}")
 
 
 def unregister():

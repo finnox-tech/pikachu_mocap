@@ -2,12 +2,16 @@ import json
 import queue
 import socket
 import threading
+import time
 
 HOST = "0.0.0.0"
 PORT = 9999
 BUFFER_SIZE = 4096
 
 msg_queue = queue.Queue()
+log_messages = []
+_log_lock = threading.Lock()
+LOG_LIMIT = 50
 
 server_running = False
 client_connected = False
@@ -24,11 +28,26 @@ def _mark_state_dirty():
     state_dirty = True
 
 
+def add_log(message):
+    text = str(message)
+    stamp = time.strftime("%H:%M:%S")
+    line = f"[{stamp}] {text}"
+    with _log_lock:
+        log_messages.append(line)
+        if len(log_messages) > LOG_LIMIT:
+            del log_messages[:-LOG_LIMIT]
+    _mark_state_dirty()
+
+
 def _set_server_running(running):
     global server_running
     if server_running != running:
         server_running = running
         _mark_state_dirty()
+        if running:
+            add_log("Server running (waiting for client)")
+        else:
+            add_log("Server stopped")
 
 
 def _set_client_state(connected, conn=None):
@@ -38,6 +57,10 @@ def _set_client_state(connected, conn=None):
         client_connected = connected
         client_conn = conn if connected else None
         _mark_state_dirty()
+        if connected:
+            add_log("Client connected")
+        else:
+            add_log("Client disconnected")
 
 
 def _close_socket(sock):
@@ -69,6 +92,7 @@ def start_server():
     server_thread.start()
 
     print("Server thread started")
+    add_log("Server thread started")
 
 
 def stop_server():
@@ -124,12 +148,14 @@ def socket_server():
 
     except Exception as e:
         print("Server error:", e)
+        add_log(f"Server error: {e}")
         _set_server_running(False)
         return
 
     _set_server_running(True)
 
     print("Listening on port", PORT)
+    add_log(f"Listening on port {PORT}")
 
     while not stop_event.is_set():
 
@@ -141,6 +167,7 @@ def socket_server():
             break
 
         print("Client connected:", addr)
+        add_log(f"Client connected: {addr}")
 
         conn.settimeout(0.5)
         _set_client_state(True, conn)
@@ -172,6 +199,7 @@ def socket_server():
         _close_socket(conn)
 
         print("Client disconnected")
+        add_log("Client disconnected")
 
     _set_client_state(False, None)
     _set_server_running(False)
