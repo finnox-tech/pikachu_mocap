@@ -16,6 +16,7 @@ class HumanoidPlotter:
         smooth_alpha=0.2,
         align_torso=True,
         scale=1.5,
+        figure=None,
     ):
         self.mp_pose = mp.solutions.pose
         self.connections = list(self.mp_pose.POSE_CONNECTIONS)
@@ -32,8 +33,11 @@ class HumanoidPlotter:
         self.last_pts = None
         self.last_angles = None
 
-        plt.ion()
-        self.fig = plt.figure(title)
+        if figure is None:
+            plt.ion()
+            self.fig = plt.figure(title)
+        else:
+            self.fig = figure
         self.ax = self.fig.add_subplot(111, projection="3d")
         self.ax.view_init(elev=15, azim=-70)
         self.ax.set_xlabel("X")
@@ -61,7 +65,7 @@ class HumanoidPlotter:
                 for name in self.landmark_names
             ]
 
-        self.axis_len = 0.05
+        self.axis_len = 0.15
         self.axis_colors = ("#ff3b30", "#34c759", "#007aff")
         self.triads = []
         if self.show_axes:
@@ -111,6 +115,86 @@ class HumanoidPlotter:
             self.root_landmarks,
             len(self.landmark_names),
         )
+
+    def _ensure_labels(self):
+        if not self.labels:
+            self.labels = [
+                self.ax.text2D(0, 0, name, transform=self.ax.transAxes, fontsize=self.label_fontsize)
+                for name in self.landmark_names
+            ]
+
+    def _ensure_axes(self):
+        if not self.triads:
+            for _ in self.landmark_names:
+                x_line, = self.ax.plot([], [], [], linewidth=1, color=self.axis_colors[0])
+                y_line, = self.ax.plot([], [], [], linewidth=1, color=self.axis_colors[1])
+                z_line, = self.ax.plot([], [], [], linewidth=1, color=self.axis_colors[2])
+                self.triads.append((x_line, y_line, z_line))
+
+    def _ensure_base(self):
+        if self.base_text is None:
+            self.base_text = self.ax.text2D(
+                0,
+                0,
+                "base_link",
+                transform=self.ax.transAxes,
+                fontsize=self.label_fontsize + 1,
+                color="#111111",
+            )
+        if self.base_x is None:
+            self.base_x, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[0])
+            self.base_y, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[1])
+            self.base_z, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[2])
+
+    def set_show_names(self, enabled: bool):
+        self.show_names = bool(enabled)
+        if self.show_names:
+            self._ensure_labels()
+            self._ensure_base()
+            for label in self.labels:
+                label.set_visible(True)
+            if self.base_text is not None:
+                self.base_text.set_visible(True)
+        else:
+            for label in self.labels:
+                label.set_visible(False)
+            if self.base_text is not None and not self.show_axes:
+                self.base_text.set_visible(False)
+        self.fig.canvas.draw_idle()
+
+    def set_show_axes(self, enabled: bool):
+        self.show_axes = bool(enabled)
+        if self.show_axes:
+            self._ensure_axes()
+            self._ensure_base()
+            for x_line, y_line, z_line in self.triads:
+                x_line.set_visible(True)
+                y_line.set_visible(True)
+                z_line.set_visible(True)
+            if self.base_x is not None:
+                self.base_x.set_visible(True)
+                self.base_y.set_visible(True)
+                self.base_z.set_visible(True)
+            if self.base_text is not None:
+                self.base_text.set_visible(True)
+        else:
+            for x_line, y_line, z_line in self.triads:
+                x_line.set_visible(False)
+                y_line.set_visible(False)
+                z_line.set_visible(False)
+                x_line.set_data_3d([], [], [])
+                y_line.set_data_3d([], [], [])
+                z_line.set_data_3d([], [], [])
+            if self.base_x is not None:
+                self.base_x.set_visible(False)
+                self.base_y.set_visible(False)
+                self.base_z.set_visible(False)
+                self.base_x.set_data_3d([], [], [])
+                self.base_y.set_data_3d([], [], [])
+                self.base_z.set_data_3d([], [], [])
+            if self.base_text is not None and not self.show_names:
+                self.base_text.set_visible(False)
+        self.fig.canvas.draw_idle()
 
     def close(self):
         plt.ioff()
@@ -363,7 +447,16 @@ class HumanoidPlotter:
 
         if self.show_axes:
             for i, (x, y, z) in enumerate(pts):
+                if self.landmark_names[i].upper() in self.hide_labels:
+                    x_line, y_line, z_line = self.triads[i]
+                    x_line.set_visible(False)
+                    y_line.set_visible(False)
+                    z_line.set_visible(False)
+                    continue
                 x_line, y_line, z_line = self.triads[i]
+                x_line.set_visible(True)
+                y_line.set_visible(True)
+                z_line.set_visible(True)
                 ax_x, ax_y, ax_z = self._local_axes(i, pts)
                 x_line.set_data_3d(
                     [x, x + self.axis_len * ax_x[0]],

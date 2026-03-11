@@ -59,6 +59,7 @@ class PikachuPlotter:
         align_torso=True,
         scale=1.5,
         config_path=None,
+        figure=None,
     ):
         self.mp_pose = mp.solutions.pose
         self.connections = list(self.mp_pose.POSE_CONNECTIONS)
@@ -77,8 +78,11 @@ class PikachuPlotter:
             config_path = os.path.join(os.path.dirname(__file__), "pikachu.yaml")
         self.config_path = config_path
 
-        plt.ion()
-        self.fig = plt.figure(title)
+        if figure is None:
+            plt.ion()
+            self.fig = plt.figure(title)
+        else:
+            self.fig = figure
         self.ax = self.fig.add_subplot(111, projection="3d")
         self.ax.view_init(elev=15, azim=-70)
         self.ax.set_xlabel("X")
@@ -106,7 +110,7 @@ class PikachuPlotter:
                 for name in self.landmark_names
             ]
 
-        self.axis_len = 0.05
+        self.axis_len = 0.15
         self.axis_colors = ("#ff3b30", "#34c759", "#007aff")
         self.triads = []
         if self.show_axes:
@@ -139,6 +143,50 @@ class PikachuPlotter:
         self._load_lengths()
 
         self.fig.canvas.mpl_connect("scroll_event", self._on_scroll)
+
+    def _ensure_labels(self):
+        if not self.labels:
+            self.labels = [
+                self.ax.text2D(0, 0, name, transform=self.ax.transAxes, fontsize=self.label_fontsize)
+                for name in self.landmark_names
+            ]
+
+    def _ensure_axes(self):
+        if not self.triads:
+            for _ in self.landmark_names:
+                x_line, = self.ax.plot([], [], [], linewidth=1, color=self.axis_colors[0])
+                y_line, = self.ax.plot([], [], [], linewidth=1, color=self.axis_colors[1])
+                z_line, = self.ax.plot([], [], [], linewidth=1, color=self.axis_colors[2])
+                self.triads.append((x_line, y_line, z_line))
+
+    def set_show_names(self, enabled: bool):
+        self.show_names = bool(enabled)
+        if self.show_names:
+            self._ensure_labels()
+            for label in self.labels:
+                label.set_visible(True)
+        else:
+            for label in self.labels:
+                label.set_visible(False)
+        self.fig.canvas.draw_idle()
+
+    def set_show_axes(self, enabled: bool):
+        self.show_axes = bool(enabled)
+        if self.show_axes:
+            self._ensure_axes()
+            for x_line, y_line, z_line in self.triads:
+                x_line.set_visible(True)
+                y_line.set_visible(True)
+                z_line.set_visible(True)
+        else:
+            for x_line, y_line, z_line in self.triads:
+                x_line.set_visible(False)
+                y_line.set_visible(False)
+                z_line.set_visible(False)
+                x_line.set_data_3d([], [], [])
+                y_line.set_data_3d([], [], [])
+                z_line.set_data_3d([], [], [])
+        self.fig.canvas.draw_idle()
 
     def _load_lengths(self):
         self.length_scales = {}
@@ -340,6 +388,18 @@ class PikachuPlotter:
                 angle = math.acos(max(-1.0, min(1.0, dot_v)))
                 pts = self._rotate_points(pts, axis, angle)
 
+            # rotate around Z so shoulder/hip plane is parallel to YZ
+            lr = self._vec_sub(pts[self.right_shoulder], pts[self.left_shoulder])
+            if self._norm(lr) < 1e-6:
+                lr = self._vec_sub(pts[self.right_hip], pts[self.left_hip])
+            lr = (lr[0], lr[1], 0.0)
+            lr_dir, lr_len = self._normalize(lr)
+            if lr_len > 1e-6:
+                current = math.atan2(lr_dir[1], lr_dir[0])
+                target_angle = math.pi / 2.0
+                rot = target_angle - current
+                pts = self._rotate_points(pts, (0.0, 0.0, 1.0), rot)
+
         if self.scale != 1.0:
             pts = [self._vec_mul(p, self.scale) for p in pts]
 
@@ -404,7 +464,16 @@ class PikachuPlotter:
 
         if self.show_axes:
             for i, (x, y, z) in enumerate(pts):
+                if self.landmark_names[i].upper() in self.hide_labels:
+                    x_line, y_line, z_line = self.triads[i]
+                    x_line.set_visible(False)
+                    y_line.set_visible(False)
+                    z_line.set_visible(False)
+                    continue
                 x_line, y_line, z_line = self.triads[i]
+                x_line.set_visible(True)
+                y_line.set_visible(True)
+                z_line.set_visible(True)
                 ax_x, ax_y, ax_z = self._local_axes(i, pts)
                 x_line.set_data_3d(
                     [x, x + self.axis_len * ax_x[0]],
