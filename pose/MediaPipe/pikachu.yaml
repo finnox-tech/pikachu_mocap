@@ -1,0 +1,67 @@
+bones:
+  - name: NOSE
+    length: 1.0
+  - name: LEFT_EYE_INNER
+    length: 1.0
+  - name: LEFT_EYE
+    length: 1.0
+  - name: LEFT_EYE_OUTER
+    length: 1.0
+  - name: RIGHT_EYE_INNER
+    length: 1.0
+  - name: RIGHT_EYE
+    length: 1.0
+  - name: RIGHT_EYE_OUTER
+    length: 1.0
+  - name: LEFT_EAR
+    length: 1.0
+  - name: RIGHT_EAR
+    length: 1.0
+  - name: MOUTH_LEFT
+    length: 1.0
+  - name: MOUTH_RIGHT
+    length: 1.0
+  - name: LEFT_SHOULDER
+    length: 1.0
+  - name: RIGHT_SHOULDER
+    length: 1.0
+  - name: LEFT_ELBOW
+    length: 1.0
+  - name: RIGHT_ELBOW
+    length: 1.0
+  - name: LEFT_WRIST
+    length: 1.0
+  - name: RIGHT_WRIST
+    length: 1.0
+  - name: LEFT_PINKY
+    length: 1.0
+  - name: RIGHT_PINKY
+    length: 1.0
+  - name: LEFT_INDEX
+    length: 1.0
+  - name: RIGHT_INDEX
+    length: 1.0
+  - name: LEFT_THUMB
+    length: 1.0
+  - name: RIGHT_THUMB
+    length: 1.0
+  - name: LEFT_HIP
+    length: 1.0
+  - name: RIGHT_HIP
+    length: 1.0
+  - name: LEFT_KNEE
+    length: 0.5
+  - name: RIGHT_KNEE
+    length: 0.5
+  - name: LEFT_ANKLE
+    length: 1.0
+  - name: RIGHT_ANKLE
+    length: 1.0
+  - name: LEFT_HEEL
+    length: 1.0
+  - name: RIGHT_HEEL
+    length: 1.0
+  - name: LEFT_FOOT_INDEX
+    length: 1.0
+  - name: RIGHT_FOOT_INDEX
+    length: 1.0
