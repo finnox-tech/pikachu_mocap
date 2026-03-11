@@ -69,6 +69,7 @@ class PikachuPlotter:
         self.show_names = show_names
         self.show_axes = show_axes
         self.show_global_axes = show_global_axes
+        self.show_head_link = False
         self.hide_labels = {n.upper() for n in (hide_labels or [])}
 
         self.smoothed = None
@@ -142,10 +143,29 @@ class PikachuPlotter:
             self.global_y, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[1])
             self.global_z, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[2])
 
+        self.head_text = None
+        self.head_x = self.head_y = self.head_z = None
+        if self.show_axes or self.show_names:
+            self.head_text = self.ax.text2D(
+                0,
+                0,
+                "head_link",
+                transform=self.ax.transAxes,
+                fontsize=self.label_fontsize + 1,
+                color="#111111",
+            )
+            if self.show_axes:
+                self.head_x, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[0])
+                self.head_y, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[1])
+                self.head_z, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[2])
+
         self.left_shoulder = self.mp_pose.PoseLandmark.LEFT_SHOULDER.value
         self.right_shoulder = self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value
         self.left_hip = self.mp_pose.PoseLandmark.LEFT_HIP.value
         self.right_hip = self.mp_pose.PoseLandmark.RIGHT_HIP.value
+        self.nose = self.mp_pose.PoseLandmark.NOSE.value
+        self.left_ear = self.mp_pose.PoseLandmark.LEFT_EAR.value
+        self.right_ear = self.mp_pose.PoseLandmark.RIGHT_EAR.value
 
         self.parent_map, self.adjacency = self._build_parent_map(
             self.connections,
@@ -325,6 +345,7 @@ class PikachuPlotter:
         if self.show_axes:
             self._ensure_axes()
             self._ensure_base()
+            self._ensure_head_link()
             for x_line, y_line, z_line in self.triads:
                 x_line.set_visible(True)
                 y_line.set_visible(True)
@@ -335,6 +356,12 @@ class PikachuPlotter:
                 self.base_z.set_visible(True)
             if self.base_text is not None:
                 self.base_text.set_visible(True)
+            if self.head_text is not None:
+                self.head_text.set_visible(True)
+            if self.head_x is not None:
+                self.head_x.set_visible(True)
+                self.head_y.set_visible(True)
+                self.head_z.set_visible(True)
         else:
             for x_line, y_line, z_line in self.triads:
                 x_line.set_visible(False)
@@ -352,7 +379,53 @@ class PikachuPlotter:
                 self.base_z.set_data_3d([], [], [])
             if self.base_text is not None and not self.show_names:
                 self.base_text.set_visible(False)
+            if self.head_text is not None and not self.show_names:
+                self.head_text.set_visible(False)
+            if self.head_x is not None:
+                self.head_x.set_visible(False)
+                self.head_y.set_visible(False)
+                self.head_z.set_visible(False)
+                self.head_x.set_data_3d([], [], [])
+                self.head_y.set_data_3d([], [], [])
+                self.head_z.set_data_3d([], [], [])
         self.fig.canvas.draw_idle()
+
+    def set_show_head_link(self, enabled: bool):
+        self.show_head_link = bool(enabled)
+        if self.show_head_link:
+            self._ensure_head_link()
+            if self.head_text is not None:
+                self.head_text.set_visible(True)
+            if self.head_x is not None:
+                self.head_x.set_visible(True)
+                self.head_y.set_visible(True)
+                self.head_z.set_visible(True)
+        else:
+            if self.head_text is not None:
+                self.head_text.set_visible(False)
+            if self.head_x is not None:
+                self.head_x.set_visible(False)
+                self.head_y.set_visible(False)
+                self.head_z.set_visible(False)
+                self.head_x.set_data_3d([], [], [])
+                self.head_y.set_data_3d([], [], [])
+                self.head_z.set_data_3d([], [], [])
+        self.fig.canvas.draw_idle()
+
+    def _ensure_head_link(self):
+        if self.head_text is None:
+            self.head_text = self.ax.text2D(
+                0,
+                0,
+                "head_link",
+                transform=self.ax.transAxes,
+                fontsize=self.label_fontsize + 1,
+                color="#111111",
+            )
+        if self.head_x is None:
+            self.head_x, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[0])
+            self.head_y, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[1])
+            self.head_z, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[2])
 
     def _load_lengths(self):
         self.length_scales = {}
@@ -688,7 +761,10 @@ class PikachuPlotter:
             right_dir, right_len = self._normalize(right_dir)
             if right_len < 1e-6:
                 right_dir = (1.0, 0.0, 0.0)
-
+            
+            # 修改Y轴方向朝负方向
+            forward_dir = self._vec_mul(forward_dir, -1.0)
+            
             bx, by, bz = base
             bx2, by2 = self._project_to_axes(
                 bx + self.label_offset[0],
@@ -712,6 +788,64 @@ class PikachuPlotter:
                     [bx, bx + scale * up_dir[0]],
                     [by, by + scale * up_dir[1]],
                     [bz, bz + scale * up_dir[2]],
+                )
+
+        # head_link: 位于LEFT_EAR和RIGHT_EAR的中点，Y轴指向NOSE，Z轴垂直于三点平面
+        if self.head_text is not None:
+            left_ear_pt = pts[self.left_ear]
+            right_ear_pt = pts[self.right_ear]
+            nose_pt = pts[self.nose]
+            
+            # ear中点
+            ear_mid = self._vec_mul(self._vec_add(left_ear_pt, right_ear_pt), 0.5)
+            
+            # Y轴指向NOSE
+            y_dir = self._vec_sub(nose_pt, ear_mid)
+            y_dir, y_len = self._normalize(y_dir)
+            if y_len < 1e-6:
+                y_dir = (0.0, 0.0, 1.0)
+            
+            # 耳朵连线方向（X轴）
+            ear_vec = self._vec_sub(right_ear_pt, left_ear_pt)
+            ear_dir, ear_len = self._normalize(ear_vec)
+            if ear_len < 1e-6:
+                ear_dir = (1.0, 0.0, 0.0)
+            
+            # Z轴垂直于三点平面
+            z_dir = self._cross(ear_dir, y_dir)
+            z_dir, z_len = self._normalize(z_dir)
+            if z_len < 1e-6:
+                z_dir = (0.0, 0.0, 1.0)
+            
+            # X轴
+            x_dir = self._cross(y_dir, z_dir)
+            x_dir, x_len = self._normalize(x_dir)
+            if x_len < 1e-6:
+                x_dir = (1.0, 0.0, 0.0)
+            
+            hx, hy, hz = ear_mid
+            hx2, hy2 = self._project_to_axes(
+                hx + self.label_offset[0],
+                hy + self.label_offset[1],
+                hz + self.label_offset[2],
+            )
+            self.head_text.set_position((hx2, hy2))
+            if self.show_axes and self.head_x is not None:
+                scale = self.axis_len * 1.5
+                self.head_x.set_data_3d(
+                    [hx, hx + scale * x_dir[0]],
+                    [hy, hy + scale * x_dir[1]],
+                    [hz, hz + scale * x_dir[2]],
+                )
+                self.head_y.set_data_3d(
+                    [hx, hx + scale * y_dir[0]],
+                    [hy, hy + scale * y_dir[1]],
+                    [hz, hz + scale * y_dir[2]],
+                )
+                self.head_z.set_data_3d(
+                    [hx, hx + scale * z_dir[0]],
+                    [hy, hy + scale * z_dir[1]],
+                    [hz, hz + scale * z_dir[2]],
                 )
 
         self.fig.canvas.draw_idle()

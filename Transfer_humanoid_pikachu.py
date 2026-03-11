@@ -92,7 +92,7 @@ def _sources_for_bone(bone_name: str):
         return ["LEFT_EAR", "RIGHT_EAR"]
 
     if "head" in n:
-        return ["NOSE", "LEFT_EAR", "RIGHT_EAR"]
+        return ["HEAD_LINK"]
 
     if "neck" in n:
         return ["LEFT_SHOULDER", "RIGHT_SHOULDER"]
@@ -163,8 +163,9 @@ def _axis_remap(bone_name: str, angles):
     if any(key in n for key in ("hip", "pelvis", "torso", "chest", "spine", "root")):
         remapped = (0.0, 0.0, remapped[2])
 
-    if "head" in n:
-        remapped = (0.0, 0.0, remapped[2])
+    # head完全映射xyz三个角度
+    # if "head" in n:
+    #     remapped = (0.0, 0.0, remapped[2])
 
     return tuple(_wrap_angle(v) for v in remapped)
 
