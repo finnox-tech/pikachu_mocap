@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+<meta charset="utf-8">
+<title>Skeleton Web Studio</title>
+
+<style>
+body{
+margin:0;
+display:flex;
+font-family:Arial;
+background:#1e1e1e;
+color:white;
+}
+
+#viewer{
+flex:1;
+}
+
+#panel{
+width:420px;
+background:#2b2b2b;
+overflow:auto;
+padding:12px;
+}
+
+h2{margin-top:0}
+
+.joint{
+border-bottom:1px solid #444;
+padding:6px 0;
+}
+
+.slider{
+width:100%;
+}
+
+.axis{
+font-size:12px;
+color:#aaa;
+}
+
+button{
+width:100%;
+margin-top:6px;
+padding:6px;
+background:#444;
+border:none;
+color:white;
+cursor:pointer;
+}
+
+.tree{
+font-size:13px;
+margin-bottom:10px;
+}
+
+</style>
+
+<script type="importmap">
+{
+"imports":{
+"three":"https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/"
+}
+}
+</script>
+
+</head>
+
+<body>
+
+<div id="viewer"></div>
+
+<div id="panel">
+
+<h2>Skeleton Studio</h2>
+
+<input id="search" placeholder="search bone">
+
+<div id="tree" class="tree"></div>
+
+<div id="controls"></div>
+
+<button onclick="resetPose()">Reset Pose</button> <button onclick="exportPose()">Export Pose</button> <button onclick="importPose()">Import Pose</button>
+
+</div>
+
+<script type="module">
+
+import * as THREE from "three"
+import {OrbitControls} from "three/addons/controls/OrbitControls.js"
+import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js"
+
+let skeleton
+let bones=[]
+let sliders={}
+let socket
+
+const scene=new THREE.Scene()
+scene.background=new THREE.Color(0x202020)
+
+const camera=new THREE.PerspectiveCamera(
+60,
+(window.innerWidth-420)/window.innerHeight,
+0.1,
+100
+)
+
+camera.position.set(2,2,3)
+
+const renderer=new THREE.WebGLRenderer({antialias:true})
+renderer.setSize(window.innerWidth-420,window.innerHeight)
+document.getElementById("viewer").appendChild(renderer.domElement)
+
+const controls=new OrbitControls(camera,renderer.domElement)
+
+scene.add(new THREE.AmbientLight(0xffffff,0.5))
+
+const light=new THREE.DirectionalLight(0xffffff,1)
+light.position.set(5,5,5)
+scene.add(light)
+
+const loader=new GLTFLoader()
+
+loader.load("pikachu_role.glb",(gltf)=>{
+
+const model=gltf.scene
+scene.add(model)
+
+model.traverse(o=>{
+if(o.isSkinnedMesh){
+
+skeleton=o.skeleton
+bones=skeleton.bones
+
+const helper=new THREE.SkeletonHelper(o)
+scene.add(helper)
+
+createTree()
+createUI()
+
+}
+})
+
+})
+
+function createTree(){
+
+const div=document.getElementById("tree")
+div.innerHTML=""
+
+bones.forEach(b=>{
+div.innerHTML+=b.name+"<br>"
+})
+
+}
+
+function createUI(){
+
+const panel=document.getElementById("controls")
+panel.innerHTML=""
+
+bones.forEach(bone=>{
+
+if(filterBone(bone.name)==false) return
+
+const div=document.createElement("div")
+div.className="joint"
+
+const title=document.createElement("div")
+title.innerText=bone.name
+
+div.appendChild(title)
+
+createAxis(div,bone,"x")
+createAxis(div,bone,"y")
+createAxis(div,bone,"z")
+
+panel.appendChild(div)
+
+})
+
+}
+
+function createAxis(container,bone,axis){
+
+const label=document.createElement("div")
+label.className="axis"
+label.innerText=axis.toUpperCase()
+
+const slider=document.createElement("input")
+slider.type="range"
+slider.min=-180
+slider.max=180
+slider.value=0
+slider.className="slider"
+
+slider.oninput=()=>{
+
+const r=THREE.MathUtils.degToRad(slider.value)
+
+bone.rotation[axis]=r
+
+sendJoint(bone.name,axis,r)
+
+}
+
+container.appendChild(label)
+container.appendChild(slider)
+
+sliders[bone.name+"_"+axis]=slider
+
+}
+
+function filterBone(name){
+
+if(name.includes("DEF")) return false
+if(name.includes("ORG")) return false
+if(name.includes("MCH")) return false
+if(name.includes("tweak")) return false
+
+return true
+
+}
+
+window.resetPose=function(){
+
+bones.forEach(b=>b.rotation.set(0,0,0))
+
+for(let s in sliders) sliders[s].value=0
+
+}
+
+window.exportPose=function(){
+
+let pose={}
+
+bones.forEach(b=>{
+pose[b.name]=[
+b.rotation.x,
+b.rotation.y,
+b.rotation.z
+]
+})
+
+const text=JSON.stringify(pose,null,2)
+
+navigator.clipboard.writeText(text)
+
+alert("Pose copied to clipboard")
+
+}
+
+window.importPose=function(){
+
+const text=prompt("Paste pose JSON")
+
+if(!text) return
+
+const pose=JSON.parse(text)
+
+for(let name in pose){
+
+const bone=bones.find(b=>b.name===name)
+
+if(!bone) continue
+
+bone.rotation.set(
+pose[name][0],
+pose[name][1],
+pose[name][2]
+)
+
+}
+
+}
+
+document.getElementById("search").oninput=function(){
+
+const txt=this.value.toLowerCase()
+
+const joints=document.querySelectorAll(".joint")
+
+joints.forEach(j=>{
+j.style.display=j.innerText.toLowerCase().includes(txt)
+?"block":"none"
+})
+
+}
+
+function connectWS(){
+
+try{
+
+socket=new WebSocket("ws://localhost:8765")
+
+socket.onmessage=(msg)=>{
+
+const data=JSON.parse(msg.data)
+
+const bone=bones.find(b=>b.name===data.joint)
+
+if(!bone) return
+
+bone.rotation[data.axis]=data.angle
+
+}
+
+}catch(e){
+console.log("WS not connected")
+}
+
+}
+
+function sendJoint(name,axis,angle){
+
+if(!socket) return
+
+socket.send(JSON.stringify({
+joint:name,
+axis:axis,
+angle:angle
+}))
+
+}
+
+connectWS()
+
+function animate(){
+
+requestAnimationFrame(animate)
+
+renderer.render(scene,camera)
+
+}
+
+animate()
+
+</script>
+
+</body>
+</html>
+
