@@ -1,7 +1,6 @@
 import bpy
 import json
 from math import radians, degrees
-from mathutils import Euler, Matrix
 
 from . import server
 
@@ -118,7 +117,6 @@ def get_pose_bone(armature_name, bone_name):
 # ==========================
 
 def set_joint(bone_name, axis, angle):
-
     try:
         arm, bone = get_pose_bone(ARMATURE_NAME, bone_name)
     except Exception as e:
@@ -127,11 +125,8 @@ def set_joint(bone_name, axis, angle):
         return
 
     bone.rotation_mode = 'XYZ'
-
     e = bone.rotation_euler
-
     angle = radians(angle)
-
     if axis == "x":
         e.x = angle
     elif axis == "y":
@@ -140,6 +135,34 @@ def set_joint(bone_name, axis, angle):
         e.z = angle
 
     bone.rotation_euler = e
+    bpy.context.view_layer.update()
+
+
+def set_pose(pose):
+    if not pose:
+        return
+
+    arm = get_armature()
+    if arm is None:
+        _send_debug("Set pose failed: armature not found.")
+        return
+
+    if not ensure_pose_mode(arm):
+        _send_debug("Set pose failed: cannot enter pose mode.")
+        return
+
+    for bone_name, angles in pose.items():
+        if not isinstance(angles, (list, tuple)) or len(angles) < 3:
+            continue
+        bone = arm.pose.bones.get(bone_name)
+        if bone is None:
+            continue
+        bone.rotation_mode = 'XYZ'
+        e = bone.rotation_euler
+        e.x = radians(angles[0])
+        e.y = radians(angles[1])
+        e.z = radians(angles[2])
+        bone.rotation_euler = e
 
     bpy.context.view_layer.update()
 
@@ -306,6 +329,10 @@ def handle_message(msg):
                 data["axis"],
                 data["angle"]
             )
+        elif data["type"] == "set_pose":
+
+            pose = data.get("pose") or {}
+            set_pose(pose)
 
         elif data["type"] == "request_pose":
 

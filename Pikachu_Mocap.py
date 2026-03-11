@@ -6,6 +6,7 @@ import os
 import math
 import cv2
 import mediapipe as mp
+import time
 from typing import Any
 
 from PySide6.QtWidgets import *
@@ -20,6 +21,8 @@ PORT = 9999
 BASE_DIR = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(BASE_DIR, "addon", "scripts", "joint_config.yaml")
 SKELETON_PATH = os.path.join(BASE_DIR, "addon", "scripts", "pikachu_skeleton.yaml")
+HUMANOID_SKELETON_PATH = os.path.join(BASE_DIR, "addon", "scripts", "humanoid_skeleton.yaml")
+PIKACHU_POSE_SKELETON_PATH = os.path.join(BASE_DIR, "addon", "scripts", "pikachu_pose_skeleton.yaml")
 MEDIA_DIR = os.path.join(BASE_DIR, "pose", "MediaPipe")
 
 if MEDIA_DIR not in sys.path:
@@ -28,6 +31,7 @@ if MEDIA_DIR not in sys.path:
 from MediaPipe_detect import MediaPipeDetector
 from Humanoid_frame import HumanoidPlotter
 from Pikachu_frame import PikachuPlotter
+from Transfer_humanoid_pikachu import map_humanoid_to_pikachu
 
 try:
     import yaml
@@ -234,7 +238,7 @@ def load_skeleton():
         return None
 
 
-def save_skeleton(data: dict):
+def save_skeleton_to(path, data: dict):
 
     try:
         normalized = {"bones": []}
@@ -258,13 +262,17 @@ def save_skeleton(data: dict):
             elif local_matrix is not None:
                 out["local_matrix"] = str(local_matrix)
             normalized["bones"].append(out)
-        with open(SKELETON_PATH, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as f:
             if _HAVE_YAML:
                 yaml.safe_dump(normalized, f, allow_unicode=True, sort_keys=False)
             else:
                 f.write(_dump_skeleton_fallback(normalized))
     except Exception as e:
         print("Skeleton save error:", e)
+
+
+def save_skeleton(data: dict):
+    save_skeleton_to(SKELETON_PATH, data)
 
 
 def load_config():
@@ -342,6 +350,14 @@ class BlenderClient:
             "bone": bone,
             "axis": axis,
             "angle": angle
+        })
+
+    def set_pose(self, pose):
+        if not pose:
+            return
+        self.send({
+            "type": "set_pose",
+            "pose": pose
         })
 
     def request_pose(self):
@@ -550,7 +566,7 @@ class JointPanel(QWidget):
 
 class BoneItem(QWidget):
 
-    def __init__(self, name, angles, on_select):
+    def __init__(self, name, angles, on_select, on_toggle=None, checked=True):
 
         super().__init__()
 
@@ -558,6 +574,12 @@ class BoneItem(QWidget):
 
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
+
+        self.sync_checkbox = QCheckBox()
+        self.sync_checkbox.setChecked(bool(checked))
+        self.sync_checkbox.setToolTip("Sync from pose")
+        if on_toggle:
+            self.sync_checkbox.toggled.connect(lambda val, n=name: on_toggle(n, val))
 
         self.button = QPushButton(name)
         self.button.clicked.connect(lambda checked=False: on_select(name))
@@ -567,6 +589,7 @@ class BoneItem(QWidget):
         self.value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.value.setFixedWidth(140)
 
+        layout.addWidget(self.sync_checkbox, 0)
         layout.addWidget(self.button, 1)
         layout.addWidget(self.value, 0)
 
@@ -576,6 +599,9 @@ class BoneItem(QWidget):
 
         x, y, z = angles
         self.value.setText(f"X:{x}  Y:{y}  Z:{z}")
+
+    def set_sync_checked(self, checked):
+        self.sync_checkbox.setChecked(bool(checked))
 
 
 class SkeletonPlot(QWidget):
@@ -982,6 +1008,8 @@ class Studio(QWidget):
         self.bone_order = []
         self.bone_limits = {}
         self.bone_tree = []
+        self.bone_sync = {}
+        self._updating_select_all = False
         self._connected_once = False
         self._pending_save_skeleton = False
         self._skeleton_loaded = False
@@ -991,6 +1019,10 @@ class Studio(QWidget):
         self._save_timeout_timer.setInterval(2000)
         self._save_timeout_timer.setSingleShot(True)
         self._save_timeout_timer.timeout.connect(self._on_save_timeout)
+        self.last_pose_time = 0.0
+        self.pose_interval = 1.0 / 12.0
+        self.sync_threshold = 1
+        self._last_sent_angles = {}
         self.config = load_config()
         bones = self.config.get("bones", [])
 
@@ -1004,6 +1036,18 @@ class Studio(QWidget):
         self.status_label = QLabel("Status: Waiting")
         self.status_label.setStyleSheet("font-size: 13px;")
         list_layout.addWidget(self.status_label)
+
+        self.sync_toggle = QCheckBox("Sync to Blender")
+        self.sync_toggle.setChecked(False)
+        self.sync_toggle.setToolTip("Auto sync MediaPipe pose to Blender")
+        self.sync_toggle.toggled.connect(self._on_sync_toggled)
+        list_layout.addWidget(self.sync_toggle)
+
+        self.plot_sync_toggle = QCheckBox("Sync to Plot")
+        self.plot_sync_toggle.setChecked(True)
+        self.plot_sync_toggle.setToolTip("Preview MediaPipe pose in skeleton plot only")
+        self.plot_sync_toggle.toggled.connect(self._on_plot_sync_toggled)
+        list_layout.addWidget(self.plot_sync_toggle)
 
         self.reset_btn = QPushButton("Reset All")
         self.reset_btn.clicked.connect(self.reset_all)
@@ -1022,6 +1066,11 @@ class Studio(QWidget):
 
         list_container = QWidget()
         list_container_layout = QVBoxLayout()
+
+        self.select_all_checkbox = QCheckBox("Select All")
+        self.select_all_checkbox.setChecked(False)
+        self.select_all_checkbox.toggled.connect(self._on_select_all_changed)
+        list_container_layout.addWidget(self.select_all_checkbox)
 
         self.joint_panel = JointPanel(
             self.client,
@@ -1077,6 +1126,8 @@ class Studio(QWidget):
         self.humanoid_axes_btn = QPushButton("A")
         self.humanoid_axes_btn.setCheckable(True)
         self.humanoid_axes_btn.setToolTip("Show axes (-a)")
+        self.humanoid_save_btn = QPushButton("S")
+        self.humanoid_save_btn.setToolTip("Save humanoid skeleton")
 
         self.pikachu_names_btn = QPushButton("N")
         self.pikachu_names_btn.setCheckable(True)
@@ -1084,12 +1135,16 @@ class Studio(QWidget):
         self.pikachu_axes_btn = QPushButton("A")
         self.pikachu_axes_btn.setCheckable(True)
         self.pikachu_axes_btn.setToolTip("Show axes (-a)")
+        self.pikachu_save_btn = QPushButton("S")
+        self.pikachu_save_btn.setToolTip("Save pikachu skeleton")
 
         for btn in [
             self.humanoid_names_btn,
             self.humanoid_axes_btn,
+            self.humanoid_save_btn,
             self.pikachu_names_btn,
             self.pikachu_axes_btn,
+            self.pikachu_save_btn,
         ]:
             btn.setFixedSize(24, 20)
             btn.setStyleSheet(
@@ -1099,8 +1154,12 @@ class Studio(QWidget):
 
         self.humanoid_names_btn.toggled.connect(self.humanoid_plotter.set_show_names)
         self.humanoid_axes_btn.toggled.connect(self.humanoid_plotter.set_show_axes)
+        self.humanoid_save_btn.clicked.connect(self.save_humanoid_skeleton)
         self.pikachu_names_btn.toggled.connect(self.pikachu_plotter.set_show_names)
         self.pikachu_axes_btn.toggled.connect(self.pikachu_plotter.set_show_axes)
+        self.pikachu_save_btn.clicked.connect(self.save_pikachu_skeleton)
+
+        default_sync = self.select_all_checkbox.isChecked()
 
         for bone_cfg in bones:
             name = bone_cfg.get("name", "").strip()
@@ -1116,12 +1175,19 @@ class Studio(QWidget):
             az = _parse_axis_spec(angles[2])
             parsed_angles = [ax[0], ay[0], az[0]]
             self.bone_angles[name] = parsed_angles
+            self.bone_sync[name] = default_sync
             self.bone_limits[name] = {
                 "x": (ax[1], ax[2]),
                 "y": (ay[1], ay[2]),
                 "z": (az[1], az[2])
             }
-            item = BoneItem(name, parsed_angles, self.joint_panel.set_bone)
+            item = BoneItem(
+                name,
+                parsed_angles,
+                self.joint_panel.set_bone,
+                self._on_bone_sync_changed,
+                checked=default_sync
+            )
             self.bone_items[name] = item
             self.bone_order.append(name)
             list_container_layout.addWidget(item)
@@ -1148,12 +1214,20 @@ class Studio(QWidget):
         grid_layout.setSpacing(8)
         grid_layout.addWidget(self._make_panel("Camera", self.camera_label), 0, 0)
         grid_layout.addWidget(
-            self._make_panel("Pose 3D", self.humanoid_canvas, [self.humanoid_axes_btn, self.humanoid_names_btn]),
+            self._make_panel(
+                "Pose 3D",
+                self.humanoid_canvas,
+                [self.humanoid_axes_btn, self.humanoid_names_btn, self.humanoid_save_btn]
+            ),
             0,
             1
         )
         grid_layout.addWidget(
-            self._make_panel("Pikachu 3D", self.pikachu_canvas, [self.pikachu_axes_btn, self.pikachu_names_btn]),
+            self._make_panel(
+                "Pikachu 3D",
+                self.pikachu_canvas,
+                [self.pikachu_axes_btn, self.pikachu_names_btn, self.pikachu_save_btn]
+            ),
             1,
             0
         )
@@ -1204,13 +1278,18 @@ class Studio(QWidget):
             self.joint_panel.set_bone(self.bone_order[0])
 
     def update_status(self):
-
+        sync_state = "ON" if self.sync_toggle.isChecked() else "OFF"
+        plot_state = "ON" if self.plot_sync_toggle.isChecked() else "OFF"
         if self.client.connected:
-            self.status_label.setText("Status: Connected")
+            self.status_label.setText(
+                f"Status: Connected | Blender: {sync_state} | Plot: {plot_state}"
+            )
             if not self._connected_once:
                 self._connected_once = True
         else:
-            self.status_label.setText("Status: Waiting")
+            self.status_label.setText(
+                f"Status: Waiting | Blender: {sync_state} | Plot: {plot_state}"
+            )
             self._connected_once = False
 
     def update_camera(self):
@@ -1245,6 +1324,52 @@ class Studio(QWidget):
                 )
             )
 
+        should_preview = self.plot_sync_toggle.isChecked() or self.sync_toggle.isChecked()
+        if should_preview and self.humanoid_plotter.last_angles and self.bone_order:
+            now = time.time()
+            if now - self.last_pose_time >= self.pose_interval:
+                self.last_pose_time = now
+                mapped = map_humanoid_to_pikachu(self.humanoid_plotter.last_angles, self.bone_order)
+                if mapped:
+                    pose_payload = {}
+                    any_changed = False
+                    for bone in self.bone_order:
+                        if not self.bone_sync.get(bone, True):
+                            continue
+                        angles = mapped.get(bone)
+                        if angles is None:
+                            continue
+                        limits = self.get_limits(bone)
+                        clamped = [
+                            max(limits["x"][0], min(limits["x"][1], angles[0])),
+                            max(limits["y"][0], min(limits["y"][1], angles[1])),
+                            max(limits["z"][0], min(limits["z"][1], angles[2])),
+                        ]
+                        new_angles = [int(round(a)) for a in clamped]
+                        prev_angles = self.bone_angles.get(bone)
+                        if prev_angles != new_angles:
+                            self.bone_angles[bone] = new_angles
+                            any_changed = True
+                            item = self.bone_items.get(bone)
+                            if item:
+                                item.set_angles(new_angles)
+
+                        last_sent = self._last_sent_angles.get(bone)
+                        if last_sent is None or any(
+                            abs(new_angles[i] - last_sent[i]) >= self.sync_threshold
+                            for i in range(3)
+                        ):
+                            pose_payload[bone] = new_angles
+                            self._last_sent_angles[bone] = new_angles
+
+                    if any_changed:
+                        if self.joint_panel.bone:
+                            self.joint_panel._set_angles(self.bone_angles[self.joint_panel.bone])
+                        self.skeleton_plot.update_angles(self.bone_angles)
+
+                    if self.sync_toggle.isChecked() and pose_payload and self.client.connected:
+                        self.client.set_pose(pose_payload)
+
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb.shape
         qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
@@ -1252,6 +1377,22 @@ class Studio(QWidget):
         self.camera_label.setPixmap(
             pix.scaled(self.camera_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         )
+
+    def save_humanoid_skeleton(self):
+        bones = self.humanoid_plotter.export_skeleton()
+        if not bones:
+            print("Humanoid skeleton save skipped: no pose data yet.")
+            return
+        save_skeleton_to(HUMANOID_SKELETON_PATH, {"bones": bones})
+        print(f"Saved humanoid skeleton: {HUMANOID_SKELETON_PATH}")
+
+    def save_pikachu_skeleton(self):
+        bones = self.pikachu_plotter.export_skeleton()
+        if not bones:
+            print("Pikachu skeleton save skipped: no pose data yet.")
+            return
+        save_skeleton_to(PIKACHU_POSE_SKELETON_PATH, {"bones": bones})
+        print(f"Saved pikachu skeleton: {PIKACHU_POSE_SKELETON_PATH}")
 
     def request_transforms(self):
         if self.client.connected:
@@ -1329,6 +1470,8 @@ class Studio(QWidget):
         if item:
             item.set_angles(angles)
         self.skeleton_plot.update_angles(self.bone_angles)
+
+        self._last_sent_angles[bone] = list(angles)
 
     def get_angles(self, bone):
 
@@ -1441,6 +1584,7 @@ class Studio(QWidget):
                 max(limits["z"][0], min(limits["z"][1], 0))
             ]
             self.bone_angles[name] = angles
+            self._last_sent_angles[name] = list(angles)
             item = self.bone_items.get(name)
             if item:
                 item.set_angles(angles)
@@ -1462,6 +1606,41 @@ class Studio(QWidget):
         if hasattr(self, "pikachu_plotter") and self.pikachu_plotter is not None:
             self.pikachu_plotter.close()
         super().closeEvent(event)
+
+    def _on_sync_toggled(self, enabled):
+        state = "ON" if enabled else "OFF"
+        print(f"Auto sync: {state}")
+        self._last_sent_angles = {}
+        self.last_pose_time = 0.0
+
+    def _on_plot_sync_toggled(self, enabled):
+        state = "ON" if enabled else "OFF"
+        print(f"Plot preview: {state}")
+        self.last_pose_time = 0.0
+
+    def _on_select_all_changed(self, enabled):
+        if self._updating_select_all:
+            return
+        self._updating_select_all = True
+        for name, item in self.bone_items.items():
+            item.sync_checkbox.blockSignals(True)
+            item.sync_checkbox.setChecked(enabled)
+            item.sync_checkbox.blockSignals(False)
+            self.bone_sync[name] = bool(enabled)
+        self._last_sent_angles = {}
+        self._updating_select_all = False
+
+    def _on_bone_sync_changed(self, bone, enabled):
+        self.bone_sync[bone] = bool(enabled)
+        if enabled:
+            self.joint_panel.set_bone(bone)
+        if self._updating_select_all:
+            return
+        self._last_sent_angles.pop(bone, None)
+        all_checked = all(self.bone_sync.values()) if self.bone_sync else False
+        self._updating_select_all = True
+        self.select_all_checkbox.setChecked(all_checked)
+        self._updating_select_all = False
 
 
 if __name__ == "__main__":

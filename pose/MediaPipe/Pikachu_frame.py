@@ -120,6 +120,22 @@ class PikachuPlotter:
                 z_line, = self.ax.plot([], [], [], linewidth=1, color=self.axis_colors[2])
                 self.triads.append((x_line, y_line, z_line))
 
+        self.base_text = None
+        self.base_x = self.base_y = self.base_z = None
+        if self.show_axes or self.show_names:
+            self.base_text = self.ax.text2D(
+                0,
+                0,
+                "base_link",
+                transform=self.ax.transAxes,
+                fontsize=self.label_fontsize + 1,
+                color="#111111",
+            )
+            if self.show_axes:
+                self.base_x, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[0])
+                self.base_y, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[1])
+                self.base_z, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[2])
+
         self.global_x = self.global_y = self.global_z = None
         if self.show_global_axes:
             self.global_x, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[0])
@@ -140,9 +156,123 @@ class PikachuPlotter:
         self.name_to_idx = {lm.name: lm.value for lm in self.mp_pose.PoseLandmark}
         self.length_scales = {}
         self.config_names = []
+        self.last_pts = None
         self._load_lengths()
 
         self.fig.canvas.mpl_connect("scroll_event", self._on_scroll)
+
+    def _mat4_mul(self, a, b):
+        return [
+            [
+                a[i][0] * b[0][j] +
+                a[i][1] * b[1][j] +
+                a[i][2] * b[2][j] +
+                a[i][3] * b[3][j]
+                for j in range(4)
+            ]
+            for i in range(4)
+        ]
+
+    def _invert_rt(self, mat):
+        r = [
+            [mat[0][0], mat[0][1], mat[0][2]],
+            [mat[1][0], mat[1][1], mat[1][2]],
+            [mat[2][0], mat[2][1], mat[2][2]],
+        ]
+        t = [mat[0][3], mat[1][3], mat[2][3]]
+        rt = [
+            [r[0][0], r[1][0], r[2][0]],
+            [r[0][1], r[1][1], r[2][1]],
+            [r[0][2], r[1][2], r[2][2]],
+        ]
+        inv_t = [
+            -(rt[0][0] * t[0] + rt[0][1] * t[1] + rt[0][2] * t[2]),
+            -(rt[1][0] * t[0] + rt[1][1] * t[1] + rt[1][2] * t[2]),
+            -(rt[2][0] * t[0] + rt[2][1] * t[1] + rt[2][2] * t[2]),
+        ]
+        return [
+            [rt[0][0], rt[0][1], rt[0][2], inv_t[0]],
+            [rt[1][0], rt[1][1], rt[1][2], inv_t[1]],
+            [rt[2][0], rt[2][1], rt[2][2], inv_t[2]],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+
+    def _bone_basis(self, head, tail):
+        direction = self._vec_sub(tail, head)
+        x_axis, length = self._normalize(direction)
+        if length < 1e-6:
+            x_axis = (1.0, 0.0, 0.0)
+        up = (0.0, 0.0, 1.0)
+        y_axis, y_len = self._normalize(self._cross(up, x_axis))
+        if y_len < 1e-6:
+            y_axis, y_len = self._normalize(self._cross((0.0, 1.0, 0.0), x_axis))
+            if y_len < 1e-6:
+                y_axis = (0.0, 1.0, 0.0)
+        z_axis, _ = self._normalize(self._cross(x_axis, y_axis))
+        return x_axis, y_axis, z_axis
+
+    def export_skeleton(self):
+        if self.last_pts is None:
+            return []
+
+        pts = self.last_pts
+        total = len(pts)
+        parents = self.parent_map
+        names = [lm.name for lm in self.mp_pose.PoseLandmark]
+        adjacency = self.adjacency
+
+        order = []
+        visited = set()
+
+        def _visit(idx):
+            if idx in visited:
+                return
+            parent = parents.get(idx)
+            if parent is not None:
+                _visit(parent)
+            visited.add(idx)
+            order.append(idx)
+
+        for i in range(total):
+            _visit(i)
+
+        world = {}
+        bones = []
+        for idx in order:
+            parent = parents.get(idx)
+            head = pts[parent] if parent is not None else pts[idx]
+            if parent is None:
+                children = [n for n in adjacency.get(idx, []) if n != parent]
+                if children:
+                    tail = pts[children[0]]
+                else:
+                    tail = (head[0] + 0.1, head[1], head[2])
+            else:
+                tail = pts[idx]
+
+            x_axis, y_axis, z_axis = self._bone_basis(head, tail)
+            mat = [
+                [x_axis[0], y_axis[0], z_axis[0], head[0]],
+                [x_axis[1], y_axis[1], z_axis[1], head[1]],
+                [x_axis[2], y_axis[2], z_axis[2], head[2]],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+            if parent is None:
+                local = mat
+            else:
+                local = self._mat4_mul(self._invert_rt(world[parent]), mat)
+            world[idx] = mat
+
+            bones.append({
+                "name": names[idx],
+                "parent": names[parent] if parent is not None else None,
+                "head": [float(head[0]), float(head[1]), float(head[2])],
+                "tail": [float(tail[0]), float(tail[1]), float(tail[2])],
+                "matrix": mat,
+                "local_matrix": local,
+            })
+
+        return bones
 
     def _ensure_labels(self):
         if not self.labels:
@@ -159,25 +289,52 @@ class PikachuPlotter:
                 z_line, = self.ax.plot([], [], [], linewidth=1, color=self.axis_colors[2])
                 self.triads.append((x_line, y_line, z_line))
 
+    def _ensure_base(self):
+        if self.base_text is None:
+            self.base_text = self.ax.text2D(
+                0,
+                0,
+                "base_link",
+                transform=self.ax.transAxes,
+                fontsize=self.label_fontsize + 1,
+                color="#111111",
+            )
+        if self.base_x is None:
+            self.base_x, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[0])
+            self.base_y, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[1])
+            self.base_z, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[2])
+
     def set_show_names(self, enabled: bool):
         self.show_names = bool(enabled)
         if self.show_names:
             self._ensure_labels()
+            self._ensure_base()
             for label in self.labels:
                 label.set_visible(True)
+            if self.base_text is not None:
+                self.base_text.set_visible(True)
         else:
             for label in self.labels:
                 label.set_visible(False)
+            if self.base_text is not None and not self.show_axes:
+                self.base_text.set_visible(False)
         self.fig.canvas.draw_idle()
 
     def set_show_axes(self, enabled: bool):
         self.show_axes = bool(enabled)
         if self.show_axes:
             self._ensure_axes()
+            self._ensure_base()
             for x_line, y_line, z_line in self.triads:
                 x_line.set_visible(True)
                 y_line.set_visible(True)
                 z_line.set_visible(True)
+            if self.base_x is not None:
+                self.base_x.set_visible(True)
+                self.base_y.set_visible(True)
+                self.base_z.set_visible(True)
+            if self.base_text is not None:
+                self.base_text.set_visible(True)
         else:
             for x_line, y_line, z_line in self.triads:
                 x_line.set_visible(False)
@@ -186,6 +343,15 @@ class PikachuPlotter:
                 x_line.set_data_3d([], [], [])
                 y_line.set_data_3d([], [], [])
                 z_line.set_data_3d([], [], [])
+            if self.base_x is not None:
+                self.base_x.set_visible(False)
+                self.base_y.set_visible(False)
+                self.base_z.set_visible(False)
+                self.base_x.set_data_3d([], [], [])
+                self.base_y.set_data_3d([], [], [])
+                self.base_z.set_data_3d([], [], [])
+            if self.base_text is not None and not self.show_names:
+                self.base_text.set_visible(False)
         self.fig.canvas.draw_idle()
 
     def _load_lengths(self):
@@ -388,7 +554,7 @@ class PikachuPlotter:
                 angle = math.acos(max(-1.0, min(1.0, dot_v)))
                 pts = self._rotate_points(pts, axis, angle)
 
-            # rotate around Z so shoulder/hip plane is parallel to YZ
+            # rotate around Z so shoulder/hip plane is parallel to XZ
             lr = self._vec_sub(pts[self.right_shoulder], pts[self.left_shoulder])
             if self._norm(lr) < 1e-6:
                 lr = self._vec_sub(pts[self.right_hip], pts[self.left_hip])
@@ -396,7 +562,7 @@ class PikachuPlotter:
             lr_dir, lr_len = self._normalize(lr)
             if lr_len > 1e-6:
                 current = math.atan2(lr_dir[1], lr_dir[0])
-                target_angle = math.pi / 2.0
+                target_angle = 0.0
                 rot = target_angle - current
                 pts = self._rotate_points(pts, (0.0, 0.0, 1.0), rot)
 
@@ -438,6 +604,7 @@ class PikachuPlotter:
 
         pts = self._to_points(landmarks)
         pts = self._remap_lengths(pts)
+        self.last_pts = pts
 
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
@@ -489,6 +656,62 @@ class PikachuPlotter:
                     [x, x + self.axis_len * ax_z[0]],
                     [y, y + self.axis_len * ax_z[1]],
                     [z, z + self.axis_len * ax_z[2]],
+                )
+
+        if self.base_text is not None:
+            base = (
+                (pts[self.left_hip][0] + pts[self.right_hip][0] + pts[self.left_shoulder][0] + pts[self.right_shoulder][0]) / 4.0,
+                (pts[self.left_hip][1] + pts[self.right_hip][1] + pts[self.left_shoulder][1] + pts[self.right_shoulder][1]) / 4.0,
+                (pts[self.left_hip][2] + pts[self.right_hip][2] + pts[self.left_shoulder][2] + pts[self.right_shoulder][2]) / 4.0,
+            )
+            mid_hip = self._vec_mul(
+                self._vec_add(pts[self.left_hip], pts[self.right_hip]),
+                0.5
+            )
+            mid_sh = self._vec_mul(
+                self._vec_add(pts[self.left_shoulder], pts[self.right_shoulder]),
+                0.5
+            )
+            up_vec = self._vec_sub(mid_sh, mid_hip)
+            up_dir, up_len = self._normalize(up_vec)
+            if up_len < 1e-6:
+                up_dir = (0.0, 0.0, 1.0)
+            right_vec = self._vec_sub(pts[self.right_shoulder], pts[self.left_shoulder])
+            right_dir, right_len = self._normalize(right_vec)
+            if right_len < 1e-6:
+                right_dir = (1.0, 0.0, 0.0)
+            forward_dir = self._cross(up_dir, right_dir)
+            forward_dir, forward_len = self._normalize(forward_dir)
+            if forward_len < 1e-6:
+                forward_dir = (0.0, 1.0, 0.0)
+            right_dir = self._cross(forward_dir, up_dir)
+            right_dir, right_len = self._normalize(right_dir)
+            if right_len < 1e-6:
+                right_dir = (1.0, 0.0, 0.0)
+
+            bx, by, bz = base
+            bx2, by2 = self._project_to_axes(
+                bx + self.label_offset[0],
+                by + self.label_offset[1],
+                bz + self.label_offset[2],
+            )
+            self.base_text.set_position((bx2, by2))
+            if self.show_axes and self.base_x is not None:
+                scale = self.axis_len * 1.5
+                self.base_x.set_data_3d(
+                    [bx, bx + scale * right_dir[0]],
+                    [by, by + scale * right_dir[1]],
+                    [bz, bz + scale * right_dir[2]],
+                )
+                self.base_y.set_data_3d(
+                    [bx, bx + scale * forward_dir[0]],
+                    [by, by + scale * forward_dir[1]],
+                    [bz, bz + scale * forward_dir[2]],
+                )
+                self.base_z.set_data_3d(
+                    [bx, bx + scale * up_dir[0]],
+                    [by, by + scale * up_dir[1]],
+                    [bz, bz + scale * up_dir[2]],
                 )
 
         self.fig.canvas.draw_idle()
