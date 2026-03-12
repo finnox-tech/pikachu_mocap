@@ -33,6 +33,11 @@ from Humanoid_frame import HumanoidPlotter
 from Pikachu_frame import PikachuPlotter
 from Transfer_humanoid_pikachu import map_humanoid_to_pikachu
 
+# 添加urdf相关导入
+URDF_DIR = os.path.join(BASE_DIR, "urdf")
+if URDF_DIR not in sys.path:
+    sys.path.append(URDF_DIR)
+
 try:
     import yaml
     _HAVE_YAML = True
@@ -976,9 +981,196 @@ class SkeletonPlot(QWidget):
         self.canvas.draw_idle()
 
 
+class URDFJointWidget(QWidget):
+
+    def __init__(self, name, lower, upper, on_change, on_sync_change, use_degree=True, sync_checked=True):
+
+        super().__init__()
+
+        self.name = name
+        self.lower = lower
+        self.upper = upper
+        self.on_change = on_change
+        self.on_sync_change = on_sync_change
+        self.use_degree = use_degree
+        self.sync_checked = sync_checked
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        # 勾选框和标题行
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.sync_checkbox = QCheckBox()
+        self.sync_checkbox.setChecked(bool(self.sync_checked))
+        self.sync_checkbox.toggled.connect(self._on_sync_toggled)
+
+        title_label = QLabel(name)
+        title_label.setStyleSheet("font-size: 12px; font-weight: 600;")
+
+        header_layout.addWidget(self.sync_checkbox, 0)
+        header_layout.addWidget(title_label, 1)
+
+        layout.addLayout(header_layout)
+
+        # 滑动条区域
+        slider_layout = QHBoxLayout()
+        slider_layout.setContentsMargins(20, 0, 0, 0)  # 左边距20，与勾选框对齐
+
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setMinimumWidth(250)  # 增加滑动条最小宽度
+        self.slider.setMaximumWidth(500)  # 增加滑动条最大宽度
+
+        # 将弧度转换为度数（如果使用度数模式）
+        if self.use_degree:
+            lower_deg = int(lower * 180 / math.pi)
+            upper_deg = int(upper * 180 / math.pi)
+        else:
+            lower_deg = int(lower * 100)  # 弧度模式，放大100倍提高精度
+            upper_deg = int(upper * 100)
+
+        self.slider.setMinimum(lower_deg)
+        self.slider.setMaximum(upper_deg)
+        self.slider.setValue(0)
+        self.slider.valueChanged.connect(self._on_slider_change)
+
+        slider_layout.addWidget(self.slider, 1)
+
+        # 数值显示（移除angle字样，固定宽度）
+        self.value_label = QLabel()
+        self.value_label.setFixedWidth(200)  # 固定宽度，确保数字变化时不影响布局
+        self.value_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.update_value_label(0.0)
+
+        slider_layout.addWidget(self.value_label, 0)
+
+        layout.addLayout(slider_layout)
+
+        self.setLayout(layout)
+
+    def _on_slider_change(self, value):
+        # 根据模式计算实际角度
+        if self.use_degree:
+            angle_deg = value
+            angle_rad = value * math.pi / 180.0
+        else:
+            angle_rad = value / 100.0
+            angle_deg = angle_rad * 180.0 / math.pi
+
+        self.update_value_label(angle_rad)
+
+        # 调用回调函数，传入弧度值
+        if self.on_change:
+            self.on_change(self.name, angle_rad)
+
+    def _on_sync_toggled(self, checked):
+        self.sync_checked = bool(checked)
+        if self.on_sync_change:
+            self.on_sync_change(self.name, checked)
+
+    def update_value_label(self, angle_rad):
+        """更新数值标签显示（移除angle字样）"""
+        angle_deg = angle_rad * 180.0 / math.pi
+
+        lower_deg = self.lower * 180.0 / math.pi
+        upper_deg = self.upper * 180.0 / math.pi
+
+        self.value_label.setText(f"{angle_rad:.2f}(rad) {angle_deg:.1f}(deg) ({lower_deg:.0f},{upper_deg:.0f})")
+
+    def set_use_degree(self, use_degree):
+        """切换rad/degree模式"""
+        if self.use_degree == use_degree:
+            return
+
+        self.use_degree = use_degree
+
+        # 保存当前值
+        current_value = self.slider.value()
+        current_angle_rad = current_value * math.pi / 180.0 if not use_degree else current_value / 100.0
+
+        # 更新滑动条范围
+        if use_degree:
+            lower_deg = int(self.lower * 180 / math.pi)
+            upper_deg = int(self.upper * 180 / math.pi)
+        else:
+            lower_deg = int(self.lower * 100)
+            upper_deg = int(self.upper * 100)
+
+        self.slider.blockSignals(True)
+        self.slider.setMinimum(lower_deg)
+        self.slider.setMaximum(upper_deg)
+
+        # 设置当前值
+        if use_degree:
+            self.slider.setValue(int(current_angle_rad * 180.0 / math.pi))
+        else:
+            self.slider.setValue(int(current_angle_rad * 100.0))
+
+        self.slider.blockSignals(False)
+
+        # 更新显示
+        self.update_value_label(current_angle_rad)
+
+    def set_angle(self, angle_rad):
+        """设置关节角度（弧度）"""
+        if self.use_degree:
+            value = int(angle_rad * 180.0 / math.pi)
+        else:
+            value = int(angle_rad * 100.0)
+
+        self.slider.blockSignals(True)
+        self.slider.setValue(value)
+        self.slider.blockSignals(False)
+
+        self.update_value_label(angle_rad)
+
+
+class URDFJointPanel(QWidget):
+
+    def __init__(self, robot_model, on_change):
+
+        super().__init__()
+
+        self.robot = robot_model
+        self.on_change = on_change
+
+        layout = QVBoxLayout()
+
+        # 标题
+        self.title = QLabel("URDF Info")
+        self.title.setStyleSheet("font-size: 14px; font-weight: 600;")
+        layout.addWidget(self.title)
+
+        # 显示简化的URDF信息
+        if self.robot:
+            joint_count = len(self.robot.joint_names)
+
+            info_text = QLabel(f"Total joints: {joint_count}")
+            info_text.setStyleSheet("font-size: 12px; color: #666;")
+            layout.addWidget(info_text)
+
+            # 显示前几个joint的名称
+            joint_names = self.robot.joint_names[:5]
+            if joint_names:
+                joints_text = QLabel(f"Sample joints: {', '.join(joint_names)}")
+                joints_text.setStyleSheet("font-size: 11px; color: #888;")
+                layout.addWidget(joints_text)
+
+            if len(self.robot.joint_names) > 5:
+                more_text = QLabel(f"... and {len(self.robot.joint_names) - 5} more")
+                more_text.setStyleSheet("font-size: 11px; color: #888;")
+                layout.addWidget(more_text)
+
+        layout.addStretch(1)
+
+        self.setLayout(layout)
+
+
 class Studio(QWidget):
 
-    def _make_panel(self, title, widget, actions=None):
+    def _make_panel(self, title, widget, actions=None, left_actions=None):
 
         frame = QFrame()
         frame.setFrameShape(QFrame.StyledPanel)
@@ -986,23 +1178,45 @@ class Studio(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
+
+        # 左侧按钮
+        if left_actions:
+            for btn in left_actions:
+                header.addWidget(btn)
+
         label = QLabel(title)
         label.setStyleSheet("font-size: 13px; font-weight: 600;")
         header.addWidget(label)
         header.addStretch(1)
+
+        # 右侧按钮
         if actions:
             for btn in actions:
                 header.addWidget(btn)
+
         layout.addLayout(header)
         layout.addWidget(widget, 1)
         frame.setLayout(layout)
         return frame
 
-    def __init__(self):
+    def __init__(self, urdf_path=None):
 
         super().__init__()
 
         self.client = BlenderClient(self.on_blender_message)
+
+        # 创建URDF模型和查看器
+        self.urdf_robot = None
+        self.urdf_viewer = None
+        if urdf_path and os.path.exists(urdf_path):
+            try:
+                from robot_model import RobotModel
+                from robot_viewer import RobotViewer
+                self.urdf_robot = RobotModel(urdf_path)
+                self.urdf_viewer = RobotViewer(self.urdf_robot)
+                print(f"URDF loaded: {urdf_path}")
+            except Exception as e:
+                print(f"Failed to load URDF: {e}")
         self.bone_angles = {}
         self.bone_items = {}
         self.bone_order = []
@@ -1061,9 +1275,63 @@ class Studio(QWidget):
         list_title.setStyleSheet("font-size: 16px; font-weight: 600;")
         list_layout.addWidget(list_title)
 
+        # 添加Bone和URDF切换按钮
+        mode_switch_layout = QHBoxLayout()
+        mode_switch_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.bone_mode_btn = QPushButton("Bone")
+        self.bone_mode_btn.setCheckable(True)
+        self.bone_mode_btn.setChecked(True)
+        self.bone_mode_btn.clicked.connect(lambda: self._switch_mode("bone"))
+        self.bone_mode_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 12px;
+                padding: 4px 8px;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+            }
+            QPushButton:checked {
+                background: #2d6cdf;
+                color: white;
+                border: 1px solid #2d6cdf;
+            }
+        """)
+
+        self.urdf_mode_btn = QPushButton("URDF")
+        self.urdf_mode_btn.setCheckable(True)
+        self.urdf_mode_btn.setChecked(False)
+        self.urdf_mode_btn.clicked.connect(lambda: self._switch_mode("urdf"))
+        self.urdf_mode_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 12px;
+                padding: 4px 8px;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+            }
+            QPushButton:checked {
+                background: #2d6cdf;
+                color: white;
+                border: 1px solid #2d6cdf;
+            }
+        """)
+
+        mode_switch_layout.addWidget(self.bone_mode_btn)
+        mode_switch_layout.addWidget(self.urdf_mode_btn)
+        list_layout.addLayout(mode_switch_layout)
+
+        # 创建URDF joint panel
+        self.urdf_joint_panel = URDFJointPanel(
+            self.urdf_robot,
+            self._on_urdf_joint_change
+        )
+
         list_scroll = QScrollArea()
         list_scroll.setWidgetResizable(True)
 
+        # 创建列表stacked widget
+        self.list_stacked_widget = QStackedWidget()
+
+        # Bone列表container
         list_container = QWidget()
         list_container_layout = QVBoxLayout()
 
@@ -1078,6 +1346,7 @@ class Studio(QWidget):
             self.get_angles,
             self.get_limits
         )
+
         self.skeleton_plot = SkeletonPlot()
 
         self.camera_label = QLabel("Camera")
@@ -1094,6 +1363,8 @@ class Studio(QWidget):
             "MOUTH_RIGHT",
             "LEFT_EAR",
             "RIGHT_EAR",
+            "RIGHT_HEEL",
+            "LEFT_HEEL"
         ]
 
         self.detector = MediaPipeDetector()
@@ -1196,16 +1467,120 @@ class Studio(QWidget):
 
         list_container_layout.addStretch(1)
         list_container.setLayout(list_container_layout)
-        list_scroll.setWidget(list_container)
+
+        # URDF joint列表container（显示所有URDF joint的滑动条）
+        urdf_list_container = QWidget()
+        urdf_list_container_layout = QVBoxLayout()
+
+        # URDF joint标题和全选框
+        urdf_header_layout = QHBoxLayout()
+        urdf_header_layout.setContentsMargins(0, 0, 0, 0)
+
+        urdf_title = QLabel("URDF Joints")
+        urdf_title.setStyleSheet("font-size: 16px; font-weight: 600;")
+
+        self.urdf_select_all_checkbox = QCheckBox("Select All")
+        self.urdf_select_all_checkbox.setChecked(False)
+        self.urdf_select_all_checkbox.toggled.connect(self._on_urdf_select_all_changed)
+
+        urdf_header_layout.addWidget(urdf_title, 1)
+        urdf_header_layout.addWidget(self.urdf_select_all_checkbox, 0)
+
+        urdf_list_container_layout.addLayout(urdf_header_layout)
+
+        # rad/degree切换开关
+        urdf_mode_layout = QHBoxLayout()
+        urdf_mode_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.urdf_rad_btn = QPushButton("rad")
+        self.urdf_rad_btn.setCheckable(True)
+        self.urdf_rad_btn.setChecked(False)
+        self.urdf_rad_btn.clicked.connect(lambda: self._set_urdf_mode(False))
+        self.urdf_rad_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 11px;
+                padding: 4px 8px;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+            }
+            QPushButton:checked {
+                background: #2d6cdf;
+                color: white;
+                border: 1px solid #2d6cdf;
+            }
+        """)
+
+        self.urdf_degree_btn = QPushButton("degree")
+        self.urdf_degree_btn.setCheckable(True)
+        self.urdf_degree_btn.setChecked(True)
+        self.urdf_degree_btn.clicked.connect(lambda: self._set_urdf_mode(True))
+        self.urdf_degree_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 11px;
+                padding: 4px 8px;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+            }
+            QPushButton:checked {
+                background: #2d6cdf;
+                color: white;
+                border: 1px solid #2d6cdf;
+            }
+        """)
+
+        urdf_mode_layout.addWidget(self.urdf_rad_btn)
+        urdf_mode_layout.addWidget(self.urdf_degree_btn)
+        urdf_mode_layout.addStretch(1)
+
+        urdf_list_container_layout.addLayout(urdf_mode_layout)
+
+        # 添加所有URDF joint的滑动条
+        self.urdf_joint_widgets_list = {}
+        self.urdf_use_degree = True
+
+        if self.urdf_robot:
+            for name in self.urdf_robot.joint_names:
+                lower, upper = self.urdf_robot.joint_limits[name]
+
+                widget = URDFJointWidget(
+                    name,
+                    lower,
+                    upper,
+                    self._on_urdf_joint_change,
+                    self._on_urdf_joint_sync_changed,
+                    use_degree=self.urdf_use_degree,
+                    sync_checked=False
+                )
+
+                self.urdf_joint_widgets_list[name] = widget
+                urdf_list_container_layout.addWidget(widget)
+
+        urdf_list_container_layout.addStretch(1)
+        urdf_list_container.setLayout(urdf_list_container_layout)
+
+        # 添加两个container到stacked widget
+        self.list_stacked_widget.addWidget(list_container)  # 索引0: Bone列表
+        self.list_stacked_widget.addWidget(urdf_list_container)  # 索引1: URDF joint列表
+
+        list_scroll.setWidget(self.list_stacked_widget)
 
         list_layout.addWidget(list_scroll)
         list_panel.setLayout(list_layout)
 
         left_splitter = QSplitter(Qt.Vertical)
         left_splitter.addWidget(list_panel)
-        left_splitter.addWidget(self.joint_panel)
-        left_splitter.setStretchFactor(0, 2)
-        left_splitter.setStretchFactor(1, 1)
+
+        # 创建joint panel的stacked widget
+        self.joint_panel_stacked_widget = QStackedWidget()
+        self.joint_panel_stacked_widget.addWidget(self.joint_panel)  # 索引0: Bone joint panel
+        self.joint_panel_stacked_widget.addWidget(self.urdf_joint_panel)  # 索引1: URDF joint panel
+
+        left_splitter.addWidget(self.joint_panel_stacked_widget)
+        left_splitter.setStretchFactor(0, 4)  # 上半部分占4/5
+        left_splitter.setStretchFactor(1, 1)  # 下半部分占1/5
+
+        # 设置初始大小，使joint panel区域不会太大
+        left_splitter.setSizes([640, 160])
 
         grid_container = QFrame()
         grid_container.setFrameShape(QFrame.StyledPanel)
@@ -1224,9 +1599,9 @@ class Studio(QWidget):
         )
         grid_layout.addWidget(
             self._make_panel(
-                "Pikachu 3D",
-                self.pikachu_canvas,
-                [self.pikachu_axes_btn, self.pikachu_names_btn, self.pikachu_save_btn]
+                "Pikachu 3D" if self.urdf_viewer is None else "URDF Meshcat",
+                self.urdf_viewer if self.urdf_viewer else self.pikachu_canvas,
+                [] if self.urdf_viewer else [self.pikachu_axes_btn, self.pikachu_names_btn, self.pikachu_save_btn]
             ),
             1,
             0
@@ -1605,6 +1980,8 @@ class Studio(QWidget):
             self.humanoid_plotter.close()
         if hasattr(self, "pikachu_plotter") and self.pikachu_plotter is not None:
             self.pikachu_plotter.close()
+        if hasattr(self, "urdf_viewer") and self.urdf_viewer is not None:
+            self.urdf_viewer.close()
         super().closeEvent(event)
 
     def _on_sync_toggled(self, enabled):
@@ -1642,6 +2019,77 @@ class Studio(QWidget):
         self.select_all_checkbox.setChecked(all_checked)
         self._updating_select_all = False
 
+    def _toggle_urdf_panel(self):
+        """切换URDF控制面板的展开/折叠状态"""
+        if self.urdf_collapse_btn.isChecked():
+            # 展开
+            self.urdf_control_panel.setMaximumWidth(300)
+            self.urdf_control_panel.setMinimumWidth(200)
+            self.urdf_collapse_btn.setText("▼")
+        else:
+            # 折叠
+            self.urdf_control_panel.setMaximumWidth(0)
+            self.urdf_control_panel.setMinimumWidth(0)
+            self.urdf_collapse_btn.setText("▶")
+
+    def _toggle_urdf_view(self):
+        """切换URDF Meshcat和关节控制面板的显示"""
+        if self.urdf_toggle_btn.isChecked():
+            # 显示关节控制面板
+            self.urdf_stacked_widget.setCurrentIndex(1)
+        else:
+            # 显示meshcat viewer
+            self.urdf_stacked_widget.setCurrentIndex(0)
+
+    def _switch_mode(self, mode):
+        """切换Bone和URDF模式"""
+        if mode == "bone":
+            self.bone_mode_btn.setChecked(True)
+            self.urdf_mode_btn.setChecked(False)
+            self.list_stacked_widget.setCurrentIndex(0)  # 显示Bone列表
+            self.joint_panel_stacked_widget.setCurrentIndex(0)  # 显示Bone joint panel
+        elif mode == "urdf":
+            self.bone_mode_btn.setChecked(False)
+            self.urdf_mode_btn.setChecked(True)
+            self.list_stacked_widget.setCurrentIndex(1)  # 显示URDF joint列表
+            self.joint_panel_stacked_widget.setCurrentIndex(1)  # 显示URDF joint panel
+
+    def _set_urdf_mode(self, use_degree):
+        """切换URDF列表的rad/degree模式"""
+        self.urdf_use_degree = use_degree
+
+        self.urdf_rad_btn.setChecked(not use_degree)
+        self.urdf_degree_btn.setChecked(use_degree)
+
+        # 更新所有URDF joint widget的模式
+        for widget in self.urdf_joint_widgets_list.values():
+            widget.set_use_degree(use_degree)
+
+    def _on_urdf_joint_change(self, name, angle_rad):
+        """处理URDF关节角度变化（接收弧度值）"""
+        # 更新URDF模型（传入弧度）
+        if self.urdf_robot:
+            self.urdf_robot.set_joint(name, angle_rad)
+
+        # 更新URDF查看器（传入弧度）
+        if self.urdf_viewer:
+            self.urdf_viewer.update_robot()
+
+    def _on_urdf_joint_sync_changed(self, name, checked):
+        """处理URDF关节同步勾选框变化"""
+        # 更新全选框状态
+        all_checked = all(w.sync_checkbox.isChecked() for w in self.urdf_joint_widgets_list.values())
+        self.urdf_select_all_checkbox.blockSignals(True)
+        self.urdf_select_all_checkbox.setChecked(all_checked)
+        self.urdf_select_all_checkbox.blockSignals(False)
+
+    def _on_urdf_select_all_changed(self, checked):
+        """处理URDF Select All勾选框变化"""
+        for widget in self.urdf_joint_widgets_list.values():
+            widget.sync_checkbox.blockSignals(True)
+            widget.sync_checkbox.setChecked(checked)
+            widget.sync_checkbox.blockSignals(False)
+
 
 if __name__ == "__main__":
 
@@ -1649,9 +2097,22 @@ if __name__ == "__main__":
     print("CONFIG_PATH:", os.path.abspath(CONFIG_PATH))
     print("SKELETON_PATH:", os.path.abspath(SKELETON_PATH))
 
+    # URDF文件路径（可以通过命令行参数或环境变量设置）
+    urdf_path = os.path.join(BASE_DIR, "urdf", "robot", "Pikachu_V025", "urdf", "Pikachu_V025_flat_21dof.urdf")
+
+    # 检查命令行参数
+    if len(sys.argv) > 1:
+        urdf_path = sys.argv[1]
+
+    # 检查环境变量
+    if "PIKACHU_URDF_PATH" in os.environ:
+        urdf_path = os.environ["PIKACHU_URDF_PATH"]
+
+    print("URDF_PATH:", os.path.abspath(urdf_path))
+
     app = QApplication(sys.argv)
 
-    w = Studio()
+    w = Studio(urdf_path=urdf_path)
 
     w.show()
 

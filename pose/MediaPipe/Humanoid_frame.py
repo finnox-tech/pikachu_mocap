@@ -556,19 +556,20 @@ class HumanoidPlotter:
             if y_len < 1e-6:
                 y_dir = (0.0, 0.0, 1.0)
             
-            # 耳朵连线方向（X轴）
+            # 耳朵连线方向
             ear_vec = self._vec_sub(right_ear_pt, left_ear_pt)
             ear_dir, ear_len = self._normalize(ear_vec)
             if ear_len < 1e-6:
                 ear_dir = (1.0, 0.0, 0.0)
             
-            # Z轴垂直于三点平面
-            z_dir = self._cross(ear_dir, y_dir)
-            z_dir, z_len = self._normalize(z_dir)
-            if z_len < 1e-6:
-                z_dir = (0.0, 0.0, 1.0)
+            # Z轴：反向，使其朝Z正方向
+            temp_z_dir = self._cross(ear_dir, y_dir)
+            temp_z_dir, temp_z_len = self._normalize(temp_z_dir)
+            if temp_z_len < 1e-6:
+                temp_z_dir = (0.0, 0.0, 1.0)
+            z_dir = self._vec_mul(temp_z_dir, -1.0)
             
-            # X轴
+            # X轴：右手定则 X = Y x Z
             x_dir = self._cross(y_dir, z_dir)
             x_dir, x_len = self._normalize(x_dir)
             if x_len < 1e-6:
@@ -622,30 +623,34 @@ class HumanoidPlotter:
             self._vec_add(pts[self.left_shoulder], pts[self.right_shoulder]),
             0.5
         )
+        # Z轴：向上
         up_vec = self._vec_sub(mid_sh, mid_hip)
-        up_dir, up_len = self._normalize(up_vec)
-        if up_len < 1e-6:
-            up_dir = (0.0, 0.0, 1.0)
+        z_dir, z_len = self._normalize(up_vec)
+        if z_len < 1e-6:
+            z_dir = (0.0, 0.0, 1.0)
         
+        # X轴：向右（基于肩膀连线，在垂直于Z的平面上）
         right_vec = self._vec_sub(pts[self.right_shoulder], pts[self.left_shoulder])
-        right_dir, right_len = self._normalize(right_vec)
-        if right_len < 1e-6:
-            right_dir = (1.0, 0.0, 0.0)
+        # 投影到垂直于Z的平面
+        right_proj = self._vec_sub(
+            right_vec,
+            self._vec_mul(z_dir, self._dot(right_vec, z_dir))
+        )
+        x_dir, x_len = self._normalize(right_proj)
+        if x_len < 1e-6:
+            x_dir = (1.0, 0.0, 0.0)
         
-        forward_dir = self._cross(up_dir, right_dir)
-        forward_dir, forward_len = self._normalize(forward_dir)
-        if forward_len < 1e-6:
-            forward_dir = (0.0, 1.0, 0.0)
+        # Y轴：向后 (右手定则: Y = Z x X)
+        y_dir = self._cross(z_dir, x_dir)
+        y_dir, y_len = self._normalize(y_dir)
+        if y_len < 1e-6:
+            y_dir = (0.0, -1.0, 0.0)
         
-        right_dir = self._cross(forward_dir, up_dir)
-        right_dir, right_len = self._normalize(right_dir)
-        if right_len < 1e-6:
-            right_dir = (1.0, 0.0, 0.0)
+        # 反转X轴和Y轴方向
+        x_dir = self._vec_mul(x_dir, -1.0)
+        y_dir = self._vec_mul(y_dir, -1.0)
         
-        # Y轴方向朝负方向
-        forward_dir = self._vec_mul(forward_dir, -1.0)
-        
-        return right_dir, forward_dir, up_dir
+        return x_dir, y_dir, z_dir
 
     def _to_points(self, landmarks):
         xs = [p.x * 2 - 1 for p in landmarks]
@@ -783,25 +788,32 @@ class HumanoidPlotter:
                 self._vec_add(pts[self.left_shoulder], pts[self.right_shoulder]),
                 0.5
             )
+            # Z轴：向上
             up_vec = self._vec_sub(mid_sh, mid_hip)
-            up_dir, up_len = self._normalize(up_vec)
-            if up_len < 1e-6:
-                up_dir = (0.0, 0.0, 1.0)
-            right_vec = self._vec_sub(pts[self.right_shoulder], pts[self.left_shoulder])
-            right_dir, right_len = self._normalize(right_vec)
-            if right_len < 1e-6:
-                right_dir = (1.0, 0.0, 0.0)
-            forward_dir = self._cross(up_dir, right_dir)
-            forward_dir, forward_len = self._normalize(forward_dir)
-            if forward_len < 1e-6:
-                forward_dir = (0.0, 1.0, 0.0)
-            right_dir = self._cross(forward_dir, up_dir)
-            right_dir, right_len = self._normalize(right_dir)
-            if right_len < 1e-6:
-                right_dir = (1.0, 0.0, 0.0)
+            z_dir, z_len = self._normalize(up_vec)
+            if z_len < 1e-6:
+                z_dir = (0.0, 0.0, 1.0)
             
-            # 修改Y轴方向朝负方向
-            forward_dir = self._vec_mul(forward_dir, -1.0)
+            # X轴：向右（基于肩膀连线，在垂直于Z的平面上）
+            right_vec = self._vec_sub(pts[self.right_shoulder], pts[self.left_shoulder])
+            # 投影到垂直于Z的平面
+            right_proj = self._vec_sub(
+                right_vec,
+                self._vec_mul(z_dir, self._dot(right_vec, z_dir))
+            )
+            x_dir, x_len = self._normalize(right_proj)
+            if x_len < 1e-6:
+                x_dir = (1.0, 0.0, 0.0)
+            
+            # Y轴：向后 (右手定则: Y = Z x X)
+            y_dir = self._cross(z_dir, x_dir)
+            y_dir, y_len = self._normalize(y_dir)
+            if y_len < 1e-6:
+                y_dir = (0.0, -1.0, 0.0)
+            
+            # 反转X轴和Y轴方向
+            x_dir = self._vec_mul(x_dir, -1.0)
+            y_dir = self._vec_mul(y_dir, -1.0)
             
             bx, by, bz = base
             bx2, by2 = self._project_to_axes(
@@ -813,19 +825,19 @@ class HumanoidPlotter:
             if self.show_axes and self.base_x is not None:
                 scale = self.axis_len * 1.5
                 self.base_x.set_data_3d(
-                    [bx, bx + scale * right_dir[0]],
-                    [by, by + scale * right_dir[1]],
-                    [bz, bz + scale * right_dir[2]],
+                    [bx, bx + scale * x_dir[0]],
+                    [by, by + scale * x_dir[1]],
+                    [bz, bz + scale * x_dir[2]],
                 )
                 self.base_y.set_data_3d(
-                    [bx, bx + scale * forward_dir[0]],
-                    [by, by + scale * forward_dir[1]],
-                    [bz, bz + scale * forward_dir[2]],
+                    [bx, bx + scale * y_dir[0]],
+                    [by, by + scale * y_dir[1]],
+                    [bz, bz + scale * y_dir[2]],
                 )
                 self.base_z.set_data_3d(
-                    [bx, bx + scale * up_dir[0]],
-                    [by, by + scale * up_dir[1]],
-                    [bz, bz + scale * up_dir[2]],
+                    [bx, bx + scale * z_dir[0]],
+                    [by, by + scale * z_dir[1]],
+                    [bz, bz + scale * z_dir[2]],
                 )
 
         # head_link: 位于LEFT_EAR和RIGHT_EAR的中点，Y轴指向NOSE，Z轴垂直于三点平面
@@ -843,19 +855,20 @@ class HumanoidPlotter:
             if y_len < 1e-6:
                 y_dir = (0.0, 0.0, 1.0)
             
-            # 耳朵连线方向（X轴）
+            # 耳朵连线方向
             ear_vec = self._vec_sub(right_ear_pt, left_ear_pt)
             ear_dir, ear_len = self._normalize(ear_vec)
             if ear_len < 1e-6:
                 ear_dir = (1.0, 0.0, 0.0)
             
-            # Z轴垂直于三点平面（cross product of ear_vec and y_dir）
-            z_dir = self._cross(ear_dir, y_dir)
-            z_dir, z_len = self._normalize(z_dir)
-            if z_len < 1e-6:
-                z_dir = (0.0, 0.0, 1.0)
+            # Z轴：反向，使其朝Z正方向
+            temp_z_dir = self._cross(ear_dir, y_dir)
+            temp_z_dir, temp_z_len = self._normalize(temp_z_dir)
+            if temp_z_len < 1e-6:
+                temp_z_dir = (0.0, 0.0, 1.0)
+            z_dir = self._vec_mul(temp_z_dir, -1.0)
             
-            # X轴
+            # X轴：右手定则 X = Y x Z
             x_dir = self._cross(y_dir, z_dir)
             x_dir, x_len = self._normalize(x_dir)
             if x_len < 1e-6:

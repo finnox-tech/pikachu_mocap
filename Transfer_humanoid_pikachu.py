@@ -164,8 +164,11 @@ def _axis_remap(bone_name: str, angles):
         remapped = (0.0, 0.0, remapped[2])
 
     # head完全映射xyz三个角度
+    if "head" in n:
+        remapped = (remapped[1] , remapped[2]-90,remapped[0])
+
     # if "head" in n:
-    #     remapped = (0.0, 0.0, remapped[2])
+    #     remapped = (remapped[1] , remapped[2]-90,remapped[0])
 
     return tuple(_wrap_angle(v) for v in remapped)
 

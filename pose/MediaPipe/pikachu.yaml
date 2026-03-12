@@ -21,10 +21,8 @@ bones:
     length: 1.0
   - name: MOUTH_RIGHT
     length: 1.0
-  - name: LEFT_SHOULDER
-    length: 1.0
-  - name: RIGHT_SHOULDER
-    length: 1.0
+
+
   - name: LEFT_ELBOW
     length: 1.0
   - name: RIGHT_ELBOW
@@ -45,23 +43,28 @@ bones:
     length: 1.0
   - name: RIGHT_THUMB
     length: 1.0
+
+  - name: LEFT_SHOULDER
+    length: 0.8
+  - name: RIGHT_SHOULDER
+    length: 0.8
   - name: LEFT_HIP
-    length: 1.0
+    length: 0.5
   - name: RIGHT_HIP
-    length: 1.0
+    length: 0.5
   - name: LEFT_KNEE
-    length: 0.5
+    length: 0.4
   - name: RIGHT_KNEE
-    length: 0.5
+    length: 0.4
   - name: LEFT_ANKLE
-    length: 1.0
+    length: 0.4
   - name: RIGHT_ANKLE
-    length: 1.0
+    length: 0.4
   - name: LEFT_HEEL
-    length: 1.0
+    length: 0.4
   - name: RIGHT_HEEL
-    length: 1.0
+    length: 0.4
   - name: LEFT_FOOT_INDEX
-    length: 1.0
+    length: 0.4
   - name: RIGHT_FOOT_INDEX
-    length: 1.0
+    length: 0.4
