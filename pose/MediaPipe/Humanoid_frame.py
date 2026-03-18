@@ -12,6 +12,7 @@ class HumanoidPlotter:
         show_global_axes=False,
         show_names=False,
         show_axes=False,
+        show_angles=False,
         hide_labels=None,
         smooth_alpha=0.2,
         align_torso=True,
@@ -27,6 +28,7 @@ class HumanoidPlotter:
         self.show_axes = show_axes
         self.show_global_axes = show_global_axes
         self.show_head_link = False
+        self.show_angles = show_angles
         self.hide_labels = {n.upper() for n in (hide_labels or [])}
 
         self.smoothed = None
@@ -65,6 +67,10 @@ class HumanoidPlotter:
                 self.ax.text2D(0, 0, name, transform=self.ax.transAxes, fontsize=self.label_fontsize)
                 for name in self.landmark_names
             ]
+
+        self.angle_labels = []
+        if self.show_angles:
+            self._ensure_angle_labels()
 
         self.axis_len = 0.15
         self.axis_colors = ("#ff3b30", "#34c759", "#007aff")
@@ -278,6 +284,30 @@ class HumanoidPlotter:
             self.base_x, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[0])
             self.base_y, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[1])
             self.base_z, = self.ax.plot([], [], [], linewidth=2, color=self.axis_colors[2])
+
+    def _ensure_angle_labels(self):
+        if not self.angle_labels:
+            self.angle_labels = [
+                self.ax.text2D(
+                    0, 0, "",
+                    transform=self.ax.transAxes,
+                    fontsize=8,
+                    color="#ff9500",
+                    visible=False,
+                )
+                for _ in self.landmark_names
+            ]
+
+    def set_show_angles(self, enabled: bool):
+        self.show_angles = bool(enabled)
+        if self.show_angles:
+            self._ensure_angle_labels()
+            for lbl in self.angle_labels:
+                lbl.set_visible(True)
+        else:
+            for lbl in self.angle_labels:
+                lbl.set_visible(False)
+        self.fig.canvas.draw_idle()
 
     def set_show_names(self, enabled: bool):
         self.show_names = bool(enabled)
@@ -541,7 +571,10 @@ class HumanoidPlotter:
         base_axes = self._get_base_axes(pts)
         if base_axes is not None:
             base_rx, base_ry, base_rz = base_axes
-            
+
+            # BASE_LINK 在世界坐标系中的欧拉角，供 _relative_to 使用
+            angles["BASE_LINK"] = self._axes_to_euler_xyz(base_rx, base_ry, base_rz)
+
             # 计算head_link的坐标轴
             left_ear_pt = pts[self.left_ear]
             right_ear_pt = pts[self.right_ear]
@@ -898,6 +931,25 @@ class HumanoidPlotter:
                     [hy, hy + scale * z_dir[1]],
                     [hz, hz + scale * z_dir[2]],
                 )
+
+        if self.show_angles and self.last_angles and self.angle_labels:
+            for i, (x, y, z) in enumerate(pts):
+                name = self.landmark_names[i]
+                lbl = self.angle_labels[i]
+                if name.upper() in self.hide_labels:
+                    lbl.set_visible(False)
+                    continue
+                angles = self.last_angles.get(name)
+                if angles is None:
+                    lbl.set_visible(False)
+                    continue
+                ax_v, ay_v, az_v = angles
+                short = name.replace("LEFT_", "L_").replace("RIGHT_", "R_")
+                lbl.set_text(f"{short}\nx:{ax_v:.0f} y:{ay_v:.0f} z:{az_v:.0f}")
+                lbl.set_visible(True)
+                ox, oy, oz = self.label_offset
+                x2, y2 = self._project_to_axes(x + ox * 3, y + oy * 3, z + oz)
+                lbl.set_position((x2, y2))
 
         self.fig.canvas.draw_idle()
         self.fig.canvas.flush_events()

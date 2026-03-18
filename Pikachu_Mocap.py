@@ -31,7 +31,8 @@ if MEDIA_DIR not in sys.path:
 from MediaPipe_detect import MediaPipeDetector
 from Humanoid_frame import HumanoidPlotter
 from Pikachu_frame import PikachuPlotter
-from Transfer_humanoid_pikachu import map_humanoid_to_pikachu
+from transfer import map_humanoid_to_pikachu, convert_humanoid_to_urdf
+from transfer import Humanoid2Skeleton, Humanoid2Urdf, HumanoidPoseData
 
 # 添加urdf相关导入
 URDF_DIR = os.path.join(BASE_DIR, "urdf")
@@ -1205,6 +1206,10 @@ class Studio(QWidget):
 
         self.client = BlenderClient(self.on_blender_message)
 
+        # 持有转换器实例，方便外部通过 set_bias() 微调角度
+        self.skeleton_converter = Humanoid2Skeleton()
+        self.urdf_converter = Humanoid2Urdf()
+
         # 创建URDF模型和查看器
         self.urdf_robot = None
         self.urdf_viewer = None
@@ -1364,7 +1369,13 @@ class Studio(QWidget):
             "LEFT_EAR",
             "RIGHT_EAR",
             "RIGHT_HEEL",
-            "LEFT_HEEL"
+            "LEFT_HEEL",
+            "LEFT_PINKY",
+            "RIGHT_PINKY",
+            "LEFT_INDEX",
+            "RIGHT_INDEX",
+            "LEFT_THUMB",
+            "RIGHT_THUMB",
         ]
 
         self.detector = MediaPipeDetector()
@@ -1397,6 +1408,9 @@ class Studio(QWidget):
         self.humanoid_axes_btn = QPushButton("A")
         self.humanoid_axes_btn.setCheckable(True)
         self.humanoid_axes_btn.setToolTip("Show axes (-a)")
+        self.humanoid_angles_btn = QPushButton("Ang")
+        self.humanoid_angles_btn.setCheckable(True)
+        self.humanoid_angles_btn.setToolTip("Show joint angles")
         self.humanoid_save_btn = QPushButton("S")
         self.humanoid_save_btn.setToolTip("Save humanoid skeleton")
 
@@ -1412,19 +1426,21 @@ class Studio(QWidget):
         for btn in [
             self.humanoid_names_btn,
             self.humanoid_axes_btn,
+            self.humanoid_angles_btn,
             self.humanoid_save_btn,
             self.pikachu_names_btn,
             self.pikachu_axes_btn,
             self.pikachu_save_btn,
         ]:
             btn.setFixedSize(24, 20)
-            btn.setStyleSheet(
-                "QPushButton { font-size: 11px; padding: 0 2px; }"
+            btn.setStyleSheet(                "QPushButton { font-size: 11px; padding: 0 2px; }"
                 "QPushButton:checked { background: #2d6cdf; color: white; }"
             )
 
         self.humanoid_names_btn.toggled.connect(self.humanoid_plotter.set_show_names)
         self.humanoid_axes_btn.toggled.connect(self.humanoid_plotter.set_show_axes)
+        self.humanoid_angles_btn.setFixedSize(32, 20)
+        self.humanoid_angles_btn.toggled.connect(self.humanoid_plotter.set_show_angles)
         self.humanoid_save_btn.clicked.connect(self.save_humanoid_skeleton)
         self.pikachu_names_btn.toggled.connect(self.pikachu_plotter.set_show_names)
         self.pikachu_axes_btn.toggled.connect(self.pikachu_plotter.set_show_axes)
@@ -1534,12 +1550,23 @@ class Studio(QWidget):
 
         urdf_list_container_layout.addLayout(urdf_mode_layout)
 
-        # 添加所有URDF joint的滑动条
+        # 添加所有URDF joint的滑动条（从头到脚排序）
         self.urdf_joint_widgets_list = {}
         self.urdf_use_degree = True
 
+        _HEAD_TO_TOE_ORDER = [
+            "head_yaw_joint", "head_pitch_joint", "head_roll_joint",
+            "left_arm_pitch_joint", "left_arm_roll_joint", "left_arm_yaw_joint", "left_elbow_ankle_joint",
+            "right_arm_pitch_joint", "right_arm_roll_joint", "right_arm_yaw_joint", "right_elbow_ankle_joint",
+            "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint", "left_knee_joint", "left_ankle_joint",
+            "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint", "right_knee_joint", "right_ankle_joint",
+        ]
+
         if self.urdf_robot:
-            for name in self.urdf_robot.joint_names:
+            known = set(_HEAD_TO_TOE_ORDER)
+            sorted_names = [n for n in _HEAD_TO_TOE_ORDER if n in self.urdf_robot.joint_limits]
+            sorted_names += [n for n in self.urdf_robot.joint_names if n not in known]
+            for name in sorted_names:
                 lower, upper = self.urdf_robot.joint_limits[name]
 
                 widget = URDFJointWidget(
@@ -1592,7 +1619,7 @@ class Studio(QWidget):
             self._make_panel(
                 "Pose 3D",
                 self.humanoid_canvas,
-                [self.humanoid_axes_btn, self.humanoid_names_btn, self.humanoid_save_btn]
+                [self.humanoid_axes_btn, self.humanoid_angles_btn, self.humanoid_names_btn, self.humanoid_save_btn]
             ),
             0,
             1
@@ -1700,52 +1727,81 @@ class Studio(QWidget):
             )
 
         should_preview = self.plot_sync_toggle.isChecked() or self.sync_toggle.isChecked()
-        if should_preview and self.humanoid_plotter.last_angles and self.bone_order:
+        if should_preview and self.humanoid_plotter.last_angles:
             now = time.time()
             if now - self.last_pose_time >= self.pose_interval:
                 self.last_pose_time = now
-                mapped = map_humanoid_to_pikachu(self.humanoid_plotter.last_angles, self.bone_order)
-                if mapped:
-                    pose_payload = {}
-                    any_changed = False
-                    for bone in self.bone_order:
-                        if not self.bone_sync.get(bone, True):
-                            continue
-                        angles = mapped.get(bone)
-                        if angles is None:
-                            continue
-                        limits = self.get_limits(bone)
-                        clamped = [
-                            max(limits["x"][0], min(limits["x"][1], angles[0])),
-                            max(limits["y"][0], min(limits["y"][1], angles[1])),
-                            max(limits["z"][0], min(limits["z"][1], angles[2])),
-                        ]
-                        new_angles = [int(round(a)) for a in clamped]
-                        prev_angles = self.bone_angles.get(bone)
-                        if prev_angles != new_angles:
-                            self.bone_angles[bone] = new_angles
-                            any_changed = True
-                            item = self.bone_items.get(bone)
-                            if item:
-                                item.set_angles(new_angles)
 
-                        last_sent = self._last_sent_angles.get(bone)
-                        if last_sent is None or any(
-                            abs(new_angles[i] - last_sent[i]) >= self.sync_threshold
-                            for i in range(3)
-                        ):
-                            pose_payload[bone] = new_angles
-                            self._last_sent_angles[bone] = new_angles
+                # ── Bone（Skeleton）模式同步 ────────────────────────────────
+                if self.bone_order:
+                    humanoid_data = HumanoidPoseData(angles=self.humanoid_plotter.last_angles)
+                    skeleton_data = self.skeleton_converter.convert(humanoid_data, self.bone_order)
+                    mapped = skeleton_data.bone_angles
+                    if mapped:
+                        pose_payload = {}
+                        any_changed = False
+                        for bone in self.bone_order:
+                            if not self.bone_sync.get(bone, True):
+                                continue
+                            angles = mapped.get(bone)
+                            if angles is None:
+                                continue
+                            limits = self.get_limits(bone)
+                            clamped = [
+                                max(limits["x"][0], min(limits["x"][1], angles[0])),
+                                max(limits["y"][0], min(limits["y"][1], angles[1])),
+                                max(limits["z"][0], min(limits["z"][1], angles[2])),
+                            ]
+                            new_angles = [int(round(a)) for a in clamped]
+                            prev_angles = self.bone_angles.get(bone)
+                            if prev_angles != new_angles:
+                                self.bone_angles[bone] = new_angles
+                                any_changed = True
+                                item = self.bone_items.get(bone)
+                                if item:
+                                    item.set_angles(new_angles)
 
-                    if any_changed:
-                        if self.joint_panel.bone:
-                            self.joint_panel._set_angles(self.bone_angles[self.joint_panel.bone])
-                        self.skeleton_plot.update_angles(self.bone_angles)
+                            last_sent = self._last_sent_angles.get(bone)
+                            if last_sent is None or any(
+                                abs(new_angles[i] - last_sent[i]) >= self.sync_threshold
+                                for i in range(3)
+                            ):
+                                pose_payload[bone] = new_angles
+                                self._last_sent_angles[bone] = new_angles
 
-                    if self.sync_toggle.isChecked() and pose_payload and self.client.connected:
-                        self.client.set_pose(pose_payload)
+                        if any_changed:
+                            if self.joint_panel.bone:
+                                self.joint_panel._set_angles(self.bone_angles[self.joint_panel.bone])
+                            self.skeleton_plot.update_angles(self.bone_angles)
+
+                        if self.sync_toggle.isChecked() and pose_payload and self.client.connected:
+                            self.client.set_pose(pose_payload)
+
+                # ── URDF 模式同步 ───────────────────────────────────────────
+                if self.urdf_robot and self.urdf_joint_widgets_list:
+                    synced_joints = [
+                        n for n, w in self.urdf_joint_widgets_list.items()
+                        if w.sync_checkbox.isChecked()
+                    ]
+                    if synced_joints:
+                        joint_limits = {
+                            n: self.urdf_robot.joint_limits[n] for n in synced_joints
+                        }
+                        humanoid_data = HumanoidPoseData(angles=self.humanoid_plotter.last_angles)
+                        urdf_data = self.urdf_converter.convert(
+                            humanoid_data, synced_joints, joint_limits
+                        )
+                        urdf_result = urdf_data.joint_angles
+                        for jname, angle_rad in urdf_result.items():
+                            widget = self.urdf_joint_widgets_list.get(jname)
+                            if widget:
+                                widget.set_angle(angle_rad)
+                            self.urdf_robot.set_joint(jname, angle_rad)
+                        if self.urdf_viewer and urdf_result:
+                            self.urdf_viewer.update_robot()
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb = cv2.flip(rgb, 1)  # 水平镜像
         h, w, ch = rgb.shape
         qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
         pix = QPixmap.fromImage(qimg)
@@ -1970,6 +2026,14 @@ class Studio(QWidget):
         if self.joint_panel.bone:
             self.joint_panel._set_angles(self.bone_angles[self.joint_panel.bone])
         self.skeleton_plot.update_angles(self.bone_angles)
+
+        # 重置所有 URDF 关节到 0
+        for jname, widget in self.urdf_joint_widgets_list.items():
+            widget.set_angle(0.0)
+            if self.urdf_robot:
+                self.urdf_robot.set_joint(jname, 0.0)
+        if self.urdf_viewer and self.urdf_joint_widgets_list:
+            self.urdf_viewer.update_robot()
 
     def closeEvent(self, event):
         if hasattr(self, "camera_timer"):

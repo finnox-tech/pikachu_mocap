@@ -75,3 +75,27 @@ tail
    │  - Bone模式：显示选中bone的XYZ三轴滑动条          │
    │  - URDF模式：显示简化的URDF信息              │
    └─────────────────────────────────────────────────┘
+
+
+部位	URDF joint name	轴	MediaPipe 源
+头	head_yaw_joint	Z	HEAD_LINK
+头	head_pitch_joint	Y	HEAD_LINK
+头	head_roll_joint	X	HEAD_LINK
+左臂	left_arm_pitch_joint	Y	LEFT_SHOULDER
+左臂	left_arm_roll_joint	X	LEFT_SHOULDER
+左臂	left_arm_yaw_joint	Z	LEFT_SHOULDER
+左肘	left_elbow_ankle_joint	Y	LEFT_ELBOW
+右臂	right_arm_pitch_joint	Y	RIGHT_SHOULDER
+右臂	right_arm_roll_joint	X	RIGHT_SHOULDER
+右臂	right_arm_yaw_joint	Z	RIGHT_SHOULDER
+右肘	right_elbow_ankle_joint	Y	RIGHT_ELBOW
+左髋	left_hip_pitch_joint	Y	LEFT_HIP
+左髋	left_hip_roll_joint	X	LEFT_HIP
+左髋	left_hip_yaw_joint	Z	LEFT_HIP
+左膝	left_knee_joint	Y	LEFT_KNEE
+左踝	left_ankle_joint	X	LEFT_ANKLE
+右髋	right_hip_pitch_joint	Y	RIGHT_HIP
+右髋	right_hip_roll_joint	X	RIGHT_HIP
+右髋	right_hip_yaw_joint	Z	RIGHT_HIP
+右膝	right_knee_joint	Y	RIGHT_KNEE
+右踝	right_ankle_joint	X	RIGHT_ANKLE
