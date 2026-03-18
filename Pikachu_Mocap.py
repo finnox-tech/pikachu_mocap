@@ -19,7 +19,7 @@ from matplotlib.figure import Figure
 HOST = "127.0.0.1"
 PORT = 9999
 BASE_DIR = os.path.dirname(__file__)
-CONFIG_PATH = os.path.join(BASE_DIR, "addon", "scripts", "joint_config.yaml")
+CONFIG_PATH = os.path.join(BASE_DIR, "addon", "config", "blender_joint_config.yaml")
 SKELETON_PATH = os.path.join(BASE_DIR, "addon", "scripts", "pikachu_skeleton.yaml")
 HUMANOID_SKELETON_PATH = os.path.join(BASE_DIR, "addon", "scripts", "humanoid_skeleton.yaml")
 PIKACHU_POSE_SKELETON_PATH = os.path.join(BASE_DIR, "addon", "scripts", "pikachu_pose_skeleton.yaml")
@@ -1924,17 +1924,20 @@ class Studio(QWidget):
         for name, angles in pose.items():
             if name not in self.bone_angles:
                 continue
-            updated = [int(round(a)) for a in angles]
+            limits = self.get_limits(name)
+            updated = [
+                max(limits["x"][0], min(limits["x"][1], int(round(angles[0])))),
+                max(limits["y"][0], min(limits["y"][1], int(round(angles[1])))),
+                max(limits["z"][0], min(limits["z"][1], int(round(angles[2])))),
+            ]
             self.bone_angles[name] = updated
             item = self.bone_items.get(name)
             if item:
                 item.set_angles(updated)
 
         if self.joint_panel.bone and self.joint_panel.bone in pose:
-            angles = pose[self.joint_panel.bone]
-            limits = self.get_limits(self.joint_panel.bone)
-            clamped = self.joint_panel._clamp_angles(angles, limits)
-            self.joint_panel._set_angles(clamped)
+            angles = self.bone_angles[self.joint_panel.bone]
+            self.joint_panel._set_angles(angles)
 
     def save_skeleton_from_blender(self):
 

@@ -14,7 +14,7 @@ from matplotlib.figure import Figure
 
 HOST = "127.0.0.1"
 PORT = 9999
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "joint_config.yaml")
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "blender_joint_config.yaml")
 SKELETON_PATH = os.path.join(os.path.dirname(__file__), "pikachu_skeleton.yaml")
 
 try:

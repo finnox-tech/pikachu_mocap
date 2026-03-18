@@ -159,8 +159,8 @@ class Humanoid2Skeleton:
         MediaPipe 源: HEAD_LINK
         轴重映射: (x,y,z) → out_x=y, out_y=z-90, out_z=x
         """
-        self.bone_bias.setdefault( "head", (-5.0,  0.0, -5.0))
-        self.bone_scale.setdefault("head", ( 0.8,  0.8,  0.5))
+        self.bone_bias.setdefault( "head", (0.0,  10.0, 7.0))
+        self.bone_scale.setdefault("head", ( 0.8,  0.2,  0.2))
         raw = humanoid_data.get_angle("HEAD_LINK")
         if raw is None:
             return (0.0, 0.0, 0.0)
@@ -207,7 +207,7 @@ class Humanoid2Skeleton:
         if raw is None:
             return (0.0, 0.0, 0.0)
         x, y, z = self._to_skeleton_axes(raw)
-        return self._apply_bias_scale("hips", 0.0, 0.0, z)
+        return self._apply_bias_scale("hips", 0.0, 0.0, 0)
 
     def convert_tail(self, humanoid_data: HumanoidPoseData) -> Tuple[float, float, float]:
         """
@@ -230,20 +230,20 @@ class Humanoid2Skeleton:
         Skeleton bone: shoulder.L
         MediaPipe 源: RIGHT_SHOULDER
         """
-        self.bone_bias.setdefault( "shoulder.L", (0.0, 0.0, 0.0))
+        self.bone_bias.setdefault( "shoulder.L", (80.0, 0.0, 80.0))
         self.bone_scale.setdefault("shoulder.L", (1.0, 1.0, 1.0))
         raw = humanoid_data.get_angle("RIGHT_SHOULDER")
         if raw is None:
             return (0.0, 0.0, 0.0)
         x, y, z = self._to_skeleton_axes(raw)
-        return self._apply_bias_scale("shoulder.L", x, y, z)
+        return self._apply_bias_scale("shoulder.L", z, y, x)
 
     def convert_upper_arm_l(self, humanoid_data: HumanoidPoseData) -> Tuple[float, float, float]:
         """
         Skeleton bone: upper_arm_fk.L
         MediaPipe 源: RIGHT_SHOULDER
         """
-        self.bone_bias.setdefault( "upper_arm_fk.L", (85.0, 0.0, 120.0))
+        self.bone_bias.setdefault( "upper_arm_fk.L", (85.0, 0.0, 100.0))
         self.bone_scale.setdefault("upper_arm_fk.L", (1.0, 1.0, 1.0))
         raw = humanoid_data.get_angle("RIGHT_SHOULDER")
         if raw is None:
@@ -284,7 +284,7 @@ class Humanoid2Skeleton:
         Skeleton bone: shoulder.R
         MediaPipe 源: LEFT_SHOULDER
         """
-        self.bone_bias.setdefault( "shoulder.R", (0.0, 0.0, 0.0))
+        self.bone_bias.setdefault( "shoulder.R", (0.0, 0.0, -90.0))
         self.bone_scale.setdefault("shoulder.R", (1.0, 1.0, 1.0))
         raw = humanoid_data.get_angle("LEFT_SHOULDER")
         if raw is None:
@@ -297,7 +297,7 @@ class Humanoid2Skeleton:
         Skeleton bone: upper_arm_fk.R
         MediaPipe 源: LEFT_SHOULDER
         """
-        self.bone_bias.setdefault( "upper_arm_fk.R", (85, 0.0, 120.0))
+        self.bone_bias.setdefault( "upper_arm_fk.R", (5, 0.0, 270.0))
         # self.bone_bias.setdefault( "upper_arm_fk.R", (0, 40.0, -5.0))
 
         self.bone_scale.setdefault("upper_arm_fk.R", (1.0, 1.0, 1.0))

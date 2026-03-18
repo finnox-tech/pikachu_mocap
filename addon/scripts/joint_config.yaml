@@ -1,69 +1,9 @@
 bones:
-
-- name: head
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
-- name: neck
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
-- name: chest
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
-- name: torso
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-  
-- name: hips
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
-- name: shoulder.L
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-- name: shoulder.R
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
-- name: ear.L
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-- name: ear.R
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
 - name: upper_arm_fk.L
   x: 0,(-180,180)
   y: 0,(-180,180)
   z: 0,(-180,180)
-- name: upper_arm_fk.R
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
-
 - name: forearm_fk.L
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-- name: forearm_fk.R
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
-
-- name: hand_fk.R
   x: 0,(-180,180)
   y: 0,(-180,180)
   z: 0,(-180,180)
@@ -71,71 +11,15 @@ bones:
   x: 0,(-180,180)
   y: 0,(-180,180)
   z: 0,(-180,180)
-
-- name: foot_ik.R
+- name: upper_arm_fk.R
   x: 0,(-180,180)
   y: 0,(-180,180)
   z: 0,(-180,180)
-- name: foot_ik.L
+- name: forearm_fk.R
   x: 0,(-180,180)
   y: 0,(-180,180)
   z: 0,(-180,180)
-
-- name: toe.R
+- name: hand_fk.R
   x: 0,(-180,180)
   y: 0,(-180,180)
   z: 0,(-180,180)
-- name: toe.L
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
-- name: tail
-  x: 0,(-180,180)
-  y: 0,(-180,180)
-  z: 0,(-180,180)
-
-#shoulder.L
-#upper_arm.L
-#forearm.L
-#hand.L
-#f_index.01.L
-#f_index.02.L
-#f_index.03.L
-#thumb.01.L
-#thumb.02.L
-#thumb.03.L
-#f_middle.01.L
-#f_middle.02.L
-#f_middle.03.L
-#f_ring.01.L
-#f_ring.02.L
-#f_ring.03.L
-#shoulder.R
-#upper_arm.R
-#forearm.R
-#hand.R
-#f_index.01.R
-#f_index.02.R
-#f_index.03.R
-#thumb.01.R
-#thumb.02.R
-#thumb.03.R
-#f_middle.01.R
-#f_middle.02.R
-#f_middle.03.R
-#f_ring.01.R
-#f_ring.02.R
-#f_ring.03.R
-#pelvis.L
-#pelvis.R
-#thigh.L
-#shin.L
-#foot.L
-#toe.L
-#heel.02.L
-#thigh.R
-#shin.R
-#foot.R
-#toe.R
-#heel.02.R
