@@ -193,7 +193,7 @@ class Humanoid2Skeleton:
         if raw is None:
             return (0.0, 0.0, 0.0)
         x, y, z = self._to_skeleton_axes(raw)
-        return self._apply_bias_scale("chest", 0.0, 0.0, z)
+        return self._apply_bias_scale("chest", 0.0, 0.0, 0)
 
     def convert_hips(self, humanoid_data: HumanoidPoseData) -> Tuple[float, float, float]:
         """
@@ -243,7 +243,7 @@ class Humanoid2Skeleton:
         Skeleton bone: upper_arm_fk.L
         MediaPipe 源: RIGHT_SHOULDER
         """
-        self.bone_bias.setdefault( "upper_arm_fk.L", (0.0, 0.0, 0.0))
+        self.bone_bias.setdefault( "upper_arm_fk.L", (85.0, 0.0, 120.0))
         self.bone_scale.setdefault("upper_arm_fk.L", (1.0, 1.0, 1.0))
         raw = humanoid_data.get_angle("RIGHT_SHOULDER")
         if raw is None:
@@ -256,13 +256,13 @@ class Humanoid2Skeleton:
         Skeleton bone: forearm_fk.L
         MediaPipe 源: RIGHT_ELBOW
         """
-        self.bone_bias.setdefault( "forearm_fk.L", (0.0, 0.0, 0.0))
+        self.bone_bias.setdefault( "forearm_fk.L", (60.0, 0.0, -10.0))
         self.bone_scale.setdefault("forearm_fk.L", (1.0, 1.0, 1.0))
         raw = humanoid_data.get_angle("RIGHT_ELBOW")
         if raw is None:
             return (0.0, 0.0, 0.0)
         x, y, z = self._to_skeleton_axes(raw)
-        return self._apply_bias_scale("forearm_fk.L", x, y, z)
+        return self._apply_bias_scale("forearm_fk.L", x, z, y)
 
     def convert_hand_l(self, humanoid_data: HumanoidPoseData) -> Tuple[float, float, float]:
         """
@@ -275,7 +275,7 @@ class Humanoid2Skeleton:
         if raw is None:
             return (0.0, 0.0, 0.0)
         x, y, z = self._to_skeleton_axes(raw)
-        return self._apply_bias_scale("hand_fk.L", x, y, z)
+        return self._apply_bias_scale("hand_fk.L", z, y, x)
 
     # ── 右臂 ────────────────────────────────────────────────────────────────
 
